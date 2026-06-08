@@ -25,7 +25,16 @@ const TARGET_RATE: u32 = 16_000;
 const MIN_CHUNK_SECONDS: f32 = 1.0; // don't transcribe sub-second fragments
 const MAX_CHUNK_SECONDS: f32 = 12.0; // force a cut if someone talks without pausing
 const SILENCE_HANG_SECONDS: f32 = 0.4; // how much quiet marks the end of a phrase
-const SILENCE_RMS_THRESHOLD: f32 = 0.01; // below this RMS counts as silence
+// Adaptive silence: "silence" is relative to the recent loudest level, so quiet
+// (e.g. low-level system audio) still registers as speech. Falls back to an
+// absolute floor when nothing loud has been seen yet.
+const SILENCE_PEAK_DECAY: f32 = 0.995; // per audio block
+const SILENCE_REL_FRACTION: f32 = 0.12; // below 12% of recent peak = silence
+const SILENCE_ABS_FLOOR: f32 = 0.0015; // never call anything above this silence-floor noise
+// Whisper struggles on very quiet audio (mis-detects language, hallucinates), so
+// boost quiet chunks toward this peak before transcription.
+const ASR_TARGET_PEAK: f32 = 0.3;
+const ASR_MAX_GAIN: f32 = 12.0;
 
 // Gemini analysis (Phase 2).
 // Default model; the user can change it live from the UI dropdown.
@@ -129,7 +138,7 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         .unwrap_or_else(|_| DEFAULT_AUDIO_SOURCE.to_string());
 
     std::thread::spawn(move || {
-        if let Err(e) = run_pipeline(
+        let established = match run_pipeline(
             &app,
             running.clone(),
             model,
@@ -139,14 +148,18 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
             language,
             source,
         ) {
-            let _ = app.emit("transcribe-error", e);
-        }
+            Ok(lang) => lang,
+            Err(e) => {
+                let _ = app.emit("transcribe-error", e);
+                None
+            }
+        };
         running.store(false, Ordering::SeqCst);
         // Write the WAV from the accumulated PCM now that recording has stopped.
         let _ = meeting::finalize_wav(&dir);
         let _ = app.emit("listening-stopped", ());
         // High-quality whole-file re-transcription replaces the live transcript.
-        finalize_transcript(&app, &dir, &language_for_final);
+        finalize_transcript(&app, &dir, &language_for_final, established);
         // Auto-name the meeting from the (now refined) transcript if still untitled.
         maybe_generate_title(&app, &dir, &model_for_title);
     });
@@ -156,21 +169,34 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
 
 /// Two-tier transcript: after recording stops, re-transcribe the whole audio in
 /// one pass (full context) and replace the live chunked transcript with it.
-fn finalize_transcript(app: &AppHandle, dir: &std::path::Path, language: &Arc<Mutex<String>>) {
+fn finalize_transcript(
+    app: &AppHandle,
+    dir: &std::path::Path,
+    language: &Arc<Mutex<String>>,
+    established: Option<String>,
+) {
     let samples = meeting::read_wav_samples(dir);
     if samples.is_empty() {
         return;
     }
+    let samples = normalize_for_asr(&samples);
     let _ = app.emit("transcript-finalizing", ());
 
     let transcriber = match Transcriber::new(&model_path()) {
         Ok(t) => t,
         Err(_) => return,
     };
-    let lang = language
+    let setting = language
         .lock()
         .map(|l| l.clone())
         .unwrap_or_else(|_| DEFAULT_LANGUAGE.to_string());
+    // On "auto", prefer the language the live tier confidently settled on over
+    // the whole meeting; fall back to whole-file auto-detect.
+    let lang = if setting == "auto" {
+        established.unwrap_or_else(|| "auto".to_string())
+    } else {
+        setting
+    };
 
     if let Ok(result) = transcriber.transcribe(&samples, &lang, "") {
         let text = result.text.trim().to_string();
@@ -416,6 +442,20 @@ fn rms(samples: &[f32]) -> f32 {
     (sum_sq / samples.len() as f32).sqrt()
 }
 
+/// Boost quiet audio toward a target peak (only amplifies, never attenuates) so
+/// whisper detects/transcribes it reliably. Near-silence is left untouched.
+fn normalize_for_asr(samples: &[f32]) -> Vec<f32> {
+    let peak = samples.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
+    if peak < 0.005 {
+        return samples.to_vec(); // near-silence: don't amplify noise
+    }
+    let gain = (ASR_TARGET_PEAK / peak).clamp(1.0, ASR_MAX_GAIN);
+    if gain <= 1.001 {
+        return samples.to_vec();
+    }
+    samples.iter().map(|&s| (s * gain).clamp(-1.0, 1.0)).collect()
+}
+
 fn run_pipeline(
     app: &AppHandle,
     running: Arc<AtomicBool>,
@@ -425,7 +465,7 @@ fn run_pipeline(
     device: Option<String>,
     language: Arc<Mutex<String>>,
     source: String,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     // Load the model first so any error surfaces before we touch the mic.
     let transcriber = Transcriber::new(&model_path())?;
 
@@ -455,6 +495,7 @@ fn run_pipeline(
     let mut buffer: Vec<f32> = Vec::new();
     let mut silence_run: usize = 0;
     let mut had_speech = false;
+    let mut peak_level: f32 = 0.0;
 
     // Phase 2: rolling transcript + periodic Gemini analysis.
     let api_key = analyze::api_key();
@@ -478,10 +519,12 @@ fn run_pipeline(
     // speech, transcribe it and periodically ask for suggestions.
     let mut process_chunk = |chunk: Vec<f32>, speech: bool| {
         let resampled = resample(&chunk, native_rate, TARGET_RATE);
+        // Record the original audio; transcribe a level-boosted copy.
         let _ = meeting::append_pcm(&dir, &f32_to_i16(&resampled));
         if !speech {
             return; // silence: recorded, but nothing to transcribe
         }
+        let resampled = normalize_for_asr(&resampled);
         let user_setting = language
             .lock()
             .map(|l| l.clone())
@@ -592,7 +635,11 @@ fn run_pipeline(
     while running.load(Ordering::SeqCst) {
         match rx.recv_timeout(Duration::from_millis(250)) {
             Ok(samples) => {
-                if rms(&samples) < SILENCE_RMS_THRESHOLD {
+                // Adaptive silence: threshold relative to the recent loudest level.
+                let level = rms(&samples);
+                peak_level = (peak_level * SILENCE_PEAK_DECAY).max(level);
+                let threshold = (peak_level * SILENCE_REL_FRACTION).max(SILENCE_ABS_FLOOR);
+                if level < threshold {
                     silence_run += samples.len();
                 } else {
                     silence_run = 0;
@@ -623,9 +670,11 @@ fn run_pipeline(
         process_chunk(chunk, had_speech);
     }
 
+    // Release the closure's borrows so we can read the established language.
+    drop(process_chunk);
     // Dropping the capture stops the audio stream.
     drop(capture);
-    Ok(())
+    Ok(cur_lang.map(|(code, _)| code))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
