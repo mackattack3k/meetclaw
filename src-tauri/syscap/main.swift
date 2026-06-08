@@ -17,12 +17,18 @@ func logErr(_ s: String) {
 }
 
 final class Capturer: NSObject, SCStreamOutput, SCStreamDelegate {
+    var loggedFirst = false
+
     func stream(
         _ stream: SCStream,
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of type: SCStreamOutputType
     ) {
         guard type == .audio, sampleBuffer.isValid else { return }
+        if !loggedFirst {
+            loggedFirst = true
+            logErr("first audio buffer received")
+        }
         do {
             try sampleBuffer.withAudioBufferList { abl, _ in
                 for buffer in abl {
@@ -46,6 +52,11 @@ final class Capturer: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 }
 
+// Held for the process lifetime — SCStream keeps its delegate/output weakly, so
+// these must outlive run() or capture silently stops delivering buffers.
+var activeStream: SCStream?
+var activeCapturer: Capturer?
+
 func run() async {
     do {
         let content = try await SCShareableContent.excludingDesktopWindows(
@@ -68,8 +79,14 @@ func run() async {
 
         let capturer = Capturer()
         let stream = SCStream(filter: filter, configuration: config, delegate: capturer)
+        activeCapturer = capturer
+        activeStream = stream
         try stream.addStreamOutput(
             capturer, type: .audio, sampleHandlerQueue: DispatchQueue(label: "meetclaw.syscap.audio"))
+        // A screen output is also attached (frames discarded) — ScreenCaptureKit
+        // often won't deliver audio buffers without it.
+        try stream.addStreamOutput(
+            capturer, type: .screen, sampleHandlerQueue: DispatchQueue(label: "meetclaw.syscap.video"))
         try await stream.startCapture()
         logErr("capturing system audio")
     } catch {
