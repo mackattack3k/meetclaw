@@ -63,12 +63,19 @@
 - [ ] Pass the chosen language to whisper (`set_language`), or `None` to
       auto-detect, and read the detected language back from the whisper state
 
-## Phase 3 — Microphone & device selection
-- [ ] List available input devices (`cpal` enumerate)
-- [ ] Tauri command to return device list to the UI
-- [ ] Device picker dropdown in the UI
-- [ ] Pass selected device into the capture pipeline
-- [ ] Persist last-used device
+## Phase 3 — Microphone & device selection (done)
+- [x] List available input devices (`cpal` enumerate)
+- [x] Tauri command to return device list to the UI
+- [x] Device picker dropdown in the UI
+- [x] Pass selected device into the capture pipeline
+- [ ] Persist last-used device across restarts
+
+## Audio capture quality (done)
+- [x] Silence-based chunking (cut at pauses, min/max bounds) — fixes words
+      sliced across the old fixed 5s boundaries
+- [x] Flush the tail on Stop so the last seconds aren't lost
+- [x] Accept i16/u16/i32/i8/u8 device formats (not just f32)
+- [ ] Better resampler (linear → windowed-sinc) if transcription needs it
 
 ## Phase 4 — System audio (digital meetings)
 - [ ] Capture other participants' audio (Zoom/Meet/Teams)
@@ -82,8 +89,12 @@
 - [ ] Screen capture for digital meetings
 - [ ] Fold visual context into the suggestion prompt
 
+## Settings page
+- [ ] Consolidate model, input device, save location, and API key into a
+      dedicated settings panel (top bar is getting crowded)
+
 ## Refinements / tech debt
-- [ ] Sliding window with overlap (fix words clipped at 5s chunk boundaries)
+- [x] Fix words clipped at chunk boundaries (done via silence-based chunking)
 - [ ] Bundle the whisper model as a Tauri resource for distributable builds
 - [ ] Enable `whisper-rs` `metal` feature for GPU inference (speed)
 - [ ] Fall back to `tiny.en` if `base.en` can't keep up

@@ -9,6 +9,7 @@ const statusDot = document.querySelector<HTMLSpanElement>("#status-dot")!;
 const transcriptEl = document.querySelector<HTMLElement>("#transcript")!;
 const suggestionsEl = document.querySelector<HTMLElement>("#suggestions")!;
 const modelSelect = document.querySelector<HTMLSelectElement>("#model-select")!;
+const deviceSelect = document.querySelector<HTMLSelectElement>("#device-select")!;
 const notesEl = document.querySelector<HTMLTextAreaElement>("#notes")!;
 const titleInput = document.querySelector<HTMLInputElement>("#title-input")!;
 const libraryBtn = document.querySelector<HTMLButtonElement>("#library-btn")!;
@@ -96,6 +97,30 @@ async function applyModel() {
 
 modelSelect.addEventListener("change", applyModel);
 applyModel(); // push the default on load
+
+// Populate the input-device dropdown and sync the choice to the backend.
+async function loadDevices() {
+  try {
+    const devices = await invoke<string[]>("list_devices");
+    // Keep the "Default mic" option, append the enumerated devices.
+    for (const name of devices) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      deviceSelect.appendChild(opt);
+    }
+  } catch (err) {
+    statusText.textContent = `Error listing devices: ${err}`;
+  }
+}
+
+deviceSelect.addEventListener("change", () => {
+  invoke("set_device", { device: deviceSelect.value }).catch((err) => {
+    statusText.textContent = `Error setting device: ${err}`;
+  });
+});
+
+loadDevices();
 
 // Sync the user's notes to the backend, debounced so we don't spam on each keystroke.
 let notesTimer: number | undefined;

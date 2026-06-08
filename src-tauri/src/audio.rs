@@ -1,10 +1,10 @@
 // Microphone capture via cpal.
-// Captures the default input device, downmixes to mono, and streams f32
-// samples (at the device's native sample rate) through an mpsc channel.
+// Captures a chosen (or default) input device, converts any sample format to
+// f32, downmixes to mono, and streams the samples through an mpsc channel.
 // Resampling to 16 kHz happens downstream in the pipeline.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Stream, StreamConfig};
+use cpal::{Device, FromSample, Host, Sample, SampleFormat, SizedSample, Stream, StreamConfig};
 use std::sync::mpsc::Sender;
 
 pub struct AudioCapture {
@@ -14,13 +14,17 @@ pub struct AudioCapture {
 }
 
 impl AudioCapture {
-    /// Start capturing the default input device. Mono f32 samples are sent
-    /// through `tx`. The stream stops when the returned `AudioCapture` drops.
-    pub fn start(tx: Sender<Vec<f32>>) -> Result<Self, String> {
+    /// Start capturing. `device_name` selects a specific input device by name;
+    /// `None` uses the system default. Mono f32 samples are sent through `tx`.
+    /// The stream stops when the returned `AudioCapture` drops.
+    pub fn start(tx: Sender<Vec<f32>>, device_name: Option<&str>) -> Result<Self, String> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or_else(|| "no input (microphone) device found".to_string())?;
+        let device = match device_name {
+            Some(name) => find_input_device(&host, name)?,
+            None => host
+                .default_input_device()
+                .ok_or_else(|| "no input (microphone) device found".to_string())?,
+        };
 
         let default_config = device
             .default_input_config()
@@ -28,29 +32,19 @@ impl AudioCapture {
 
         let sample_rate = default_config.sample_rate().0;
         let channels = default_config.channels() as usize;
-        let config: StreamConfig = default_config.clone().into();
+        let sample_format = default_config.sample_format();
+        let config: StreamConfig = default_config.into();
 
-        let err_fn = |err| eprintln!("audio stream error: {err}");
-
-        // We only handle f32 input here; the default config on macOS is f32.
-        let stream = match default_config.sample_format() {
-            cpal::SampleFormat::F32 => device.build_input_stream(
-                &config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let mono = downmix_to_mono(data, channels);
-                    // Ignore send errors (receiver gone = we're shutting down).
-                    let _ = tx.send(mono);
-                },
-                err_fn,
-                None,
-            ),
-            other => {
-                return Err(format!(
-                    "unsupported sample format {other:?} (expected f32)"
-                ))
-            }
-        }
-        .map_err(|e| format!("failed to build input stream: {e}"))?;
+        // Handle the common device sample formats; convert each to f32.
+        let stream = match sample_format {
+            SampleFormat::F32 => build_stream::<f32>(&device, &config, channels, tx),
+            SampleFormat::I16 => build_stream::<i16>(&device, &config, channels, tx),
+            SampleFormat::U16 => build_stream::<u16>(&device, &config, channels, tx),
+            SampleFormat::I32 => build_stream::<i32>(&device, &config, channels, tx),
+            SampleFormat::I8 => build_stream::<i8>(&device, &config, channels, tx),
+            SampleFormat::U8 => build_stream::<u8>(&device, &config, channels, tx),
+            other => Err(format!("unsupported sample format: {other:?}")),
+        }?;
 
         stream
             .play()
@@ -63,12 +57,66 @@ impl AudioCapture {
     }
 }
 
-fn downmix_to_mono(data: &[f32], channels: usize) -> Vec<f32> {
+/// List the names of available input devices.
+pub fn list_input_devices() -> Vec<String> {
+    let host = cpal::default_host();
+    let mut names = Vec::new();
+    if let Ok(devices) = host.input_devices() {
+        for device in devices {
+            if let Ok(name) = device.name() {
+                names.push(name);
+            }
+        }
+    }
+    names
+}
+
+fn find_input_device(host: &Host, name: &str) -> Result<Device, String> {
+    host.input_devices()
+        .map_err(|e| format!("failed to enumerate input devices: {e}"))?
+        .find(|d| d.name().map(|n| n == name).unwrap_or(false))
+        .ok_or_else(|| format!("input device '{name}' not found"))
+}
+
+fn build_stream<T>(
+    device: &Device,
+    config: &StreamConfig,
+    channels: usize,
+    tx: Sender<Vec<f32>>,
+) -> Result<Stream, String>
+where
+    T: SizedSample + Send + 'static,
+    f32: FromSample<T>,
+{
+    device
+        .build_input_stream(
+            config,
+            move |data: &[T], _: &cpal::InputCallbackInfo| {
+                let _ = tx.send(downmix_to_mono(data, channels));
+            },
+            stream_err,
+            None,
+        )
+        .map_err(|e| format!("failed to build input stream: {e}"))
+}
+
+fn stream_err(err: cpal::StreamError) {
+    eprintln!("audio stream error: {err}");
+}
+
+fn downmix_to_mono<T>(data: &[T], channels: usize) -> Vec<f32>
+where
+    T: Sample,
+    f32: FromSample<T>,
+{
     if channels <= 1 {
-        return data.to_vec();
+        return data.iter().map(|&s| f32::from_sample(s)).collect();
     }
     data.chunks(channels)
-        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+        .map(|frame| {
+            let sum: f32 = frame.iter().map(|&s| f32::from_sample(s)).sum();
+            sum / channels as f32
+        })
         .collect()
 }
 

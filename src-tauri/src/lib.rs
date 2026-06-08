@@ -16,8 +16,12 @@ use audio::{resample, AudioCapture};
 use transcribe::Transcriber;
 
 const TARGET_RATE: u32 = 16_000;
-// How many seconds of audio to buffer before running a transcription pass.
-const CHUNK_SECONDS: f32 = 5.0;
+// Silence-based chunking: cut audio at natural pauses, not on a fixed clock, so
+// words aren't sliced across chunk boundaries.
+const MIN_CHUNK_SECONDS: f32 = 1.0; // don't transcribe sub-second fragments
+const MAX_CHUNK_SECONDS: f32 = 12.0; // force a cut if someone talks without pausing
+const SILENCE_HANG_SECONDS: f32 = 0.4; // how much quiet marks the end of a phrase
+const SILENCE_RMS_THRESHOLD: f32 = 0.01; // below this RMS counts as silence
 
 // Gemini analysis (Phase 2).
 // Default model; the user can change it live from the UI dropdown.
@@ -32,6 +36,8 @@ struct AppState {
     model: Arc<Mutex<String>>,
     notes: Arc<Mutex<String>>,
     meeting: Arc<Mutex<Option<CurrentMeeting>>>,
+    // Selected input device name; None means the system default.
+    device: Arc<Mutex<Option<String>>>,
 }
 
 /// The meeting currently being recorded into / edited.
@@ -83,9 +89,10 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
     let model_for_title = state.model.clone();
     let notes = state.notes.clone();
     let dir = current.dir;
+    let device = state.device.lock().ok().and_then(|d| d.clone());
 
     std::thread::spawn(move || {
-        if let Err(e) = run_pipeline(&app, running.clone(), model, notes, dir.clone()) {
+        if let Err(e) = run_pipeline(&app, running.clone(), model, notes, dir.clone(), device) {
             let _ = app.emit("transcribe-error", e);
         }
         running.store(false, Ordering::SeqCst);
@@ -148,6 +155,19 @@ fn stop_listening(state: State<AppState>) {
 fn set_model(model: String, state: State<AppState>) {
     if let Ok(mut current) = state.model.lock() {
         *current = model;
+    }
+}
+
+#[tauri::command]
+fn list_devices() -> Vec<String> {
+    audio::list_input_devices()
+}
+
+#[tauri::command]
+fn set_device(device: Option<String>, state: State<AppState>) {
+    if let Ok(mut current) = state.device.lock() {
+        // Treat an empty selection as "use the default device".
+        *current = device.filter(|d| !d.is_empty());
     }
 }
 
@@ -236,22 +256,35 @@ fn f32_to_i16(samples: &[f32]) -> Vec<i16> {
         .collect()
 }
 
+fn rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
+    (sum_sq / samples.len() as f32).sqrt()
+}
+
 fn run_pipeline(
     app: &AppHandle,
     running: Arc<AtomicBool>,
     model: Arc<Mutex<String>>,
     notes: Arc<Mutex<String>>,
     dir: PathBuf,
+    device: Option<String>,
 ) -> Result<(), String> {
     // Load the model first so any error surfaces before we touch the mic.
     let transcriber = Transcriber::new(&model_path())?;
 
     let (tx, rx) = mpsc::channel::<Vec<f32>>();
-    let capture = AudioCapture::start(tx)?;
+    let capture = AudioCapture::start(tx, device.as_deref())?;
     let native_rate = capture.sample_rate;
 
-    let chunk_native_len = (native_rate as f32 * CHUNK_SECONDS) as usize;
-    let mut buffer: Vec<f32> = Vec::with_capacity(chunk_native_len);
+    let min_samples = (native_rate as f32 * MIN_CHUNK_SECONDS) as usize;
+    let max_samples = (native_rate as f32 * MAX_CHUNK_SECONDS) as usize;
+    let silence_hang_samples = (native_rate as f32 * SILENCE_HANG_SECONDS) as usize;
+    let mut buffer: Vec<f32> = Vec::new();
+    let mut silence_run: usize = 0;
+    let mut had_speech = false;
 
     // Phase 2: rolling transcript + periodic Gemini analysis.
     let api_key = analyze::api_key();
@@ -267,75 +300,95 @@ fn run_pipeline(
 
     let _ = app.emit("listening-started", ());
 
+    // Process one finished chunk: always record its audio; if it contained
+    // speech, transcribe it and periodically ask for suggestions.
+    let mut process_chunk = |chunk: Vec<f32>, speech: bool| {
+        let resampled = resample(&chunk, native_rate, TARGET_RATE);
+        let _ = meeting::append_pcm(&dir, &f32_to_i16(&resampled));
+        if !speech {
+            return; // silence: recorded, but nothing to transcribe
+        }
+        match transcriber.transcribe(&resampled) {
+            Ok(text) if !text.is_empty() => {
+                transcript_history.push(text.clone());
+                let _ = meeting::append_transcript(&dir, &text);
+                let _ = app.emit("transcript", TranscriptPayload { text });
+
+                // Periodically ask Gemini for question suggestions. Run the
+                // call on its own thread so transcription keeps flowing.
+                if let Some(key) = &api_key {
+                    if last_analysis.elapsed() >= Duration::from_secs(ANALYSIS_INTERVAL_SECONDS) {
+                        last_analysis = Instant::now();
+                        let context = recent_context(&transcript_history, MAX_CONTEXT_CHARS);
+                        let key = key.clone();
+                        let selected_model = model
+                            .lock()
+                            .map(|m| m.clone())
+                            .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+                        let user_notes = notes.lock().map(|n| n.clone()).unwrap_or_default();
+                        let app_for_analysis = app.clone();
+                        let dir_for_analysis = dir.clone();
+                        std::thread::spawn(move || {
+                            match analyze::suggest_questions(
+                                &key,
+                                &selected_model,
+                                &context,
+                                &user_notes,
+                            ) {
+                                Ok(questions) if !questions.is_empty() => {
+                                    let _ =
+                                        meeting::append_suggestion(&dir_for_analysis, &questions);
+                                    let _ = app_for_analysis
+                                        .emit("suggestions", SuggestionsPayload { questions });
+                                }
+                                Ok(_) => {}
+                                Err(e) => {
+                                    let _ = app_for_analysis.emit("analysis-error", e);
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                let _ = app.emit("transcribe-error", e);
+            }
+        }
+    };
+
     while running.load(Ordering::SeqCst) {
-        // Pull whatever audio is available without busy-waiting.
         match rx.recv_timeout(Duration::from_millis(250)) {
-            Ok(samples) => buffer.extend_from_slice(&samples),
+            Ok(samples) => {
+                if rms(&samples) < SILENCE_RMS_THRESHOLD {
+                    silence_run += samples.len();
+                } else {
+                    silence_run = 0;
+                    had_speech = true;
+                }
+                buffer.extend_from_slice(&samples);
+
+                // Cut at a natural pause, or force a cut if the chunk is too long.
+                let long_enough = buffer.len() >= min_samples;
+                let at_pause = silence_run >= silence_hang_samples;
+                let too_long = buffer.len() >= max_samples;
+                if long_enough && (at_pause || too_long) {
+                    let chunk = std::mem::take(&mut buffer);
+                    let speech = had_speech;
+                    silence_run = 0;
+                    had_speech = false;
+                    process_chunk(chunk, speech);
+                }
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
+    }
 
-        if buffer.len() >= chunk_native_len {
-            // Take one chunk's worth, leave the remainder for the next pass.
-            let chunk: Vec<f32> = buffer.drain(..chunk_native_len).collect();
-            let resampled = resample(&chunk, native_rate, TARGET_RATE);
-
-            // Tee the audio to disk (raw PCM, appended live) for the recording.
-            let _ = meeting::append_pcm(&dir, &f32_to_i16(&resampled));
-
-            match transcriber.transcribe(&resampled) {
-                Ok(text) if !text.is_empty() => {
-                    transcript_history.push(text.clone());
-                    let _ = meeting::append_transcript(&dir, &text);
-                    let _ = app.emit("transcript", TranscriptPayload { text });
-
-                    // Periodically ask Gemini for question suggestions. Run the
-                    // call on its own thread so transcription keeps flowing.
-                    if let Some(key) = &api_key {
-                        if last_analysis.elapsed()
-                            >= Duration::from_secs(ANALYSIS_INTERVAL_SECONDS)
-                        {
-                            last_analysis = Instant::now();
-                            let context = recent_context(&transcript_history, MAX_CONTEXT_CHARS);
-                            let key = key.clone();
-                            let selected_model = model
-                                .lock()
-                                .map(|m| m.clone())
-                                .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
-                            let user_notes =
-                                notes.lock().map(|n| n.clone()).unwrap_or_default();
-                            let app_for_analysis = app.clone();
-                            let dir_for_analysis = dir.clone();
-                            std::thread::spawn(move || {
-                                match analyze::suggest_questions(
-                                    &key,
-                                    &selected_model,
-                                    &context,
-                                    &user_notes,
-                                ) {
-                                    Ok(questions) if !questions.is_empty() => {
-                                        let _ = meeting::append_suggestion(
-                                            &dir_for_analysis,
-                                            &questions,
-                                        );
-                                        let _ = app_for_analysis
-                                            .emit("suggestions", SuggestionsPayload { questions });
-                                    }
-                                    Ok(_) => {} // nothing useful this round
-                                    Err(e) => {
-                                        let _ = app_for_analysis.emit("analysis-error", e);
-                                    }
-                                }
-                            });
-                        }
-                    }
-                }
-                Ok(_) => {} // silence / no speech
-                Err(e) => {
-                    let _ = app.emit("transcribe-error", e);
-                }
-            }
-        }
+    // Flush whatever is left so the tail of the meeting isn't lost.
+    if !buffer.is_empty() {
+        let chunk = std::mem::take(&mut buffer);
+        process_chunk(chunk, had_speech);
     }
 
     // Dropping the capture stops the audio stream.
@@ -357,6 +410,7 @@ pub fn run() {
                 model: Arc::new(Mutex::new(DEFAULT_MODEL.to_string())),
                 notes: Arc::new(Mutex::new(String::new())),
                 meeting: Arc::new(Mutex::new(None)),
+                device: Arc::new(Mutex::new(None)),
             });
             Ok(())
         })
@@ -369,7 +423,9 @@ pub fn run() {
             new_meeting,
             list_meetings,
             load_meeting,
-            delete_meeting
+            delete_meeting,
+            list_devices,
+            set_device
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
