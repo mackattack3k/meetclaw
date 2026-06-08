@@ -80,6 +80,7 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
 
     let running = state.running.clone();
     let model = state.model.clone();
+    let model_for_title = state.model.clone();
     let notes = state.notes.clone();
     let dir = current.dir;
 
@@ -90,10 +91,52 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         running.store(false, Ordering::SeqCst);
         // Write the WAV from the accumulated PCM now that recording has stopped.
         let _ = meeting::finalize_wav(&dir);
+        // Auto-name the meeting if it's still untitled.
+        maybe_generate_title(&app, &dir, &model_for_title);
         let _ = app.emit("listening-stopped", ());
     });
 
     Ok(())
+}
+
+/// If the meeting has no real title yet, ask Gemini to name it from its content.
+fn maybe_generate_title(app: &AppHandle, dir: &std::path::Path, model: &Arc<Mutex<String>>) {
+    let needs_title = match meeting::get_title(dir) {
+        Some(t) => t.is_empty() || t == "Untitled meeting",
+        None => false,
+    };
+    if !needs_title {
+        return;
+    }
+
+    let transcript = meeting::read_transcript(dir);
+    if transcript.trim().is_empty() {
+        return;
+    }
+    let Some(key) = analyze::api_key() else {
+        return;
+    };
+
+    let notes = meeting::read_notes(dir);
+    let combined = if notes.trim().is_empty() {
+        transcript
+    } else {
+        format!("Notes:\n{notes}\n\nTranscript:\n{transcript}")
+    };
+    let context: String = combined.chars().take(6000).collect();
+
+    let selected_model = model
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+
+    if let Ok(title) = analyze::generate_title(&key, &selected_model, &context) {
+        let title = title.trim();
+        if !title.is_empty() {
+            let _ = meeting::set_title(dir, title);
+            let _ = app.emit("title-updated", title);
+        }
+    }
 }
 
 #[tauri::command]

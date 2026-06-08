@@ -93,6 +93,18 @@ fn read_meta(dir: &Path) -> Result<MeetingMeta, String> {
     serde_json::from_str(&raw).map_err(|e| format!("parse meeting.json: {e}"))
 }
 
+pub fn get_title(dir: &Path) -> Option<String> {
+    read_meta(dir).ok().map(|m| m.title)
+}
+
+pub fn read_transcript(dir: &Path) -> String {
+    fs::read_to_string(dir.join("transcript.txt")).unwrap_or_default()
+}
+
+pub fn read_notes(dir: &Path) -> String {
+    fs::read_to_string(dir.join("notes.md")).unwrap_or_default()
+}
+
 pub fn set_title(dir: &Path, title: &str) -> Result<(), String> {
     let mut meta = read_meta(dir)?;
     meta.title = title.to_string();

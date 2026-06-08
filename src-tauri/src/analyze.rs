@@ -106,6 +106,65 @@ pub fn suggest_questions(
     Ok(questions.questions)
 }
 
+/// Generate a short meeting title from the transcript/notes context.
+pub fn generate_title(api_key: &str, model: &str, context: &str) -> Result<String, String> {
+    let url = format!("{GEMINI_MODELS_URL}/{model}:generateContent");
+
+    let body = json!({
+        "systemInstruction": { "parts": [{ "text": "You write short, specific titles for meetings." }] },
+        "contents": [{
+            "role": "user",
+            "parts": [{
+                "text": format!(
+                    "Based on the following meeting content, write a concise, specific title of \
+                     3 to 7 words. Return only the title: no quotes, no preamble, no trailing \
+                     punctuation.\n\n{context}"
+                )
+            }]
+        }],
+        "generationConfig": { "responseMimeType": "text/plain" }
+    });
+
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .post(&url)
+        .header("x-goog-api-key", api_key)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .map_err(|e| format!("Gemini title request failed: {e}"))?;
+
+    let status = resp.status();
+    let raw = resp
+        .text()
+        .map_err(|e| format!("failed to read Gemini title response: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("Gemini title error {status}: {raw}"));
+    }
+
+    let text = first_text(&raw)?.unwrap_or_default();
+    Ok(clean_title(&text))
+}
+
+/// Walk a Gemini response and return the first text part, if any.
+fn first_text(raw: &str) -> Result<Option<String>, String> {
+    let parsed: GeminiResponse =
+        serde_json::from_str(raw).map_err(|e| format!("failed to parse Gemini response: {e}"))?;
+    Ok(parsed
+        .candidates
+        .into_iter()
+        .flat_map(|c| c.content.parts)
+        .find_map(|p| p.text))
+}
+
+/// Tidy a model-produced title: first line, no surrounding quotes or "Title:" prefix.
+fn clean_title(s: &str) -> String {
+    let t = s.trim();
+    let t = t.lines().next().unwrap_or(t).trim();
+    let t = t.strip_prefix("Title:").unwrap_or(t).trim();
+    t.trim_matches('"').trim().to_string()
+}
+
 #[derive(Deserialize)]
 struct GeminiResponse {
     #[serde(default)]

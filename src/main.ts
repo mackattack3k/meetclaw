@@ -257,3 +257,11 @@ listen<string>("analysis-disabled", (event) => {
 listen<string>("analysis-error", (event) => {
   statusText.textContent = `Analysis error: ${event.payload}`;
 });
+
+// Auto-generated meeting title (on stop, if still untitled). Don't clobber a
+// title the user has typed in the meantime.
+listen<string>("title-updated", (event) => {
+  if (titleInput.value.trim() === "") {
+    titleInput.value = event.payload;
+  }
+});
