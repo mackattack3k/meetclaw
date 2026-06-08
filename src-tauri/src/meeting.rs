@@ -116,6 +116,24 @@ pub fn set_title(dir: &Path, title: &str) -> Result<(), String> {
     write_meta(dir, &meta)
 }
 
+/// Read the meeting's recorded audio (16 kHz mono i16) back as f32 samples.
+pub fn read_wav_samples(dir: &Path) -> Vec<f32> {
+    let path = dir.join("audio.wav");
+    let Ok(reader) = hound::WavReader::open(path) else {
+        return Vec::new();
+    };
+    reader
+        .into_samples::<i16>()
+        .filter_map(|s| s.ok())
+        .map(|s| s as f32 / 32768.0)
+        .collect()
+}
+
+/// Replace the transcript wholesale (used by the high-quality final pass).
+pub fn overwrite_transcript(dir: &Path, text: &str) -> Result<(), String> {
+    fs::write(dir.join("transcript.txt"), text).map_err(|e| format!("write transcript: {e}"))
+}
+
 pub fn append_transcript(dir: &Path, line: &str) -> Result<(), String> {
     let mut f = OpenOptions::new()
         .create(true)

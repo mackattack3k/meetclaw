@@ -435,6 +435,21 @@ listen<string>("syscap-status", (event) => {
   statusText.textContent = event.payload;
 });
 
+// Two-tier transcript: the high-quality whole-file pass after Stop.
+listen("transcript-finalizing", () => {
+  statusText.textContent = "Refining transcript from the recording…";
+});
+listen<string>("transcript-finalized", (event) => {
+  transcriptEl.replaceChildren();
+  const sentences = event.payload.split(/(?<=[.?!])\s+/).filter((s) => s.trim());
+  if (sentences.length === 0) {
+    transcriptEl.appendChild(makePlaceholder("Transcript will appear here…"));
+  } else {
+    for (const s of sentences) appendTranscript(s);
+  }
+  statusText.textContent = "Transcript refined.";
+});
+
 // Auto-generated meeting title (on stop, if still untitled). Don't clobber a
 // title the user has typed in the meantime.
 listen<string>("title-updated", (event) => {

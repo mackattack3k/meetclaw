@@ -112,6 +112,7 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
     let running = state.running.clone();
     let model = state.model.clone();
     let model_for_title = state.model.clone();
+    let language_for_final = state.language.clone();
     let notes = state.notes.clone();
     let dir = current.dir;
     let device = state.device.lock().ok().and_then(|d| d.clone());
@@ -138,12 +139,41 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         running.store(false, Ordering::SeqCst);
         // Write the WAV from the accumulated PCM now that recording has stopped.
         let _ = meeting::finalize_wav(&dir);
-        // Auto-name the meeting if it's still untitled.
-        maybe_generate_title(&app, &dir, &model_for_title);
         let _ = app.emit("listening-stopped", ());
+        // High-quality whole-file re-transcription replaces the live transcript.
+        finalize_transcript(&app, &dir, &language_for_final);
+        // Auto-name the meeting from the (now refined) transcript if still untitled.
+        maybe_generate_title(&app, &dir, &model_for_title);
     });
 
     Ok(())
+}
+
+/// Two-tier transcript: after recording stops, re-transcribe the whole audio in
+/// one pass (full context) and replace the live chunked transcript with it.
+fn finalize_transcript(app: &AppHandle, dir: &std::path::Path, language: &Arc<Mutex<String>>) {
+    let samples = meeting::read_wav_samples(dir);
+    if samples.is_empty() {
+        return;
+    }
+    let _ = app.emit("transcript-finalizing", ());
+
+    let transcriber = match Transcriber::new(&model_path()) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let lang = language
+        .lock()
+        .map(|l| l.clone())
+        .unwrap_or_else(|_| DEFAULT_LANGUAGE.to_string());
+
+    if let Ok(result) = transcriber.transcribe(&samples, &lang) {
+        let text = result.text.trim().to_string();
+        if !text.is_empty() {
+            let _ = meeting::overwrite_transcript(dir, &text);
+            let _ = app.emit("transcript-finalized", text);
+        }
+    }
 }
 
 /// If the meeting has no real title yet, ask Gemini to name it from its content.
