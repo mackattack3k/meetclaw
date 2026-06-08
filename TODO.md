@@ -17,8 +17,15 @@
 - [x] Emit `suggestions` events to the UI
 - [x] UI panel for suggested questions (separate from transcript)
 - [x] Handle missing API key gracefully in the UI (`analysis-disabled` note)
-- [ ] Pick final model (default `claude-opus-4-8`; consider `claude-haiku-4-5` for cost/latency)
+- [x] Model selector dropdown (Opus 4.8 / Sonnet 4.6 / Haiku 4.5), live-switchable
+- [x] Provider auth: Anthropic API key, or Google Vertex AI (service account / ADC via `gcp_auth`)
 - [ ] Tune trigger cadence (time vs. number of new segments)
+- [ ] In-app credential entry + macOS Keychain (so no env vars)
+- [ ] Show active provider/model in the UI
+
+### Auth notes
+- Claude.ai Pro/Max OAuth is NOT usable — restricted to Claude Code, rejected by
+  the Messages API (Anthropic policy, Feb 2026). API key or Vertex/Bedrock only.
 
 ## Phase 3 — Microphone & device selection
 - [ ] List available input devices (`cpal` enumerate)

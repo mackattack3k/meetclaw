@@ -103,11 +103,12 @@ fn run_pipeline(
     let mut buffer: Vec<f32> = Vec::with_capacity(chunk_native_len);
 
     // Phase 2: rolling transcript + periodic Claude analysis.
-    let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
-    if api_key.is_none() {
+    let provider = analyze::detect_provider();
+    if provider.is_none() {
         let _ = app.emit(
             "analysis-disabled",
-            "ANTHROPIC_API_KEY not set — question suggestions are off.",
+            "No Claude credentials found. Set ANTHROPIC_API_KEY, or VERTEX_PROJECT_ID \
+             (+ GOOGLE_APPLICATION_CREDENTIALS / ADC) for Vertex — question suggestions are off.",
         );
     }
     let mut transcript_history: Vec<String> = Vec::new();
@@ -135,20 +136,20 @@ fn run_pipeline(
 
                     // Periodically ask Claude for question suggestions. Run the
                     // call on its own thread so transcription keeps flowing.
-                    if let Some(key) = &api_key {
+                    if let Some(prov) = &provider {
                         if last_analysis.elapsed()
                             >= Duration::from_secs(ANALYSIS_INTERVAL_SECONDS)
                         {
                             last_analysis = Instant::now();
                             let context = recent_context(&transcript_history, MAX_CONTEXT_CHARS);
-                            let key = key.clone();
+                            let prov = prov.clone();
                             let selected_model = model
                                 .lock()
                                 .map(|m| m.clone())
                                 .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
                             let app_for_analysis = app.clone();
                             std::thread::spawn(move || {
-                                match analyze::suggest_questions(&key, &selected_model, &context) {
+                                match analyze::suggest_questions(&prov, &selected_model, &context) {
                                     Ok(questions) if !questions.is_empty() => {
                                         let _ = app_for_analysis
                                             .emit("suggestions", SuggestionsPayload { questions });

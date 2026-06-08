@@ -25,4 +25,7 @@ serde_json = "1"
 cpal = "0.15"
 whisper-rs = "0.14"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+# Vertex AI auth: mints GCP access tokens from a service-account key or ADC.
+gcp_auth = "0.12"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }
 

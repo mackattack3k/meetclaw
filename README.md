@@ -59,17 +59,32 @@ While listening, MeetClaw sends the rolling transcript to the Claude API every
 ~20 seconds and shows up to 3 questions a sharp third participant might ask, in
 the right-hand panel. See `src-tauri/src/analyze.rs`.
 
-Set your API key before launching (otherwise transcription still works, but the
-suggestions panel shows a "disabled" note):
+It works with two providers, auto-selected from the environment. If neither is
+set, transcription still works and the suggestions panel shows a "disabled" note.
+
+**Option A — Anthropic API key (direct):**
 
 ```
 export ANTHROPIC_API_KEY=sk-ant-...
 npm run tauri dev
 ```
 
-The model defaults to `claude-opus-4-8`. For this high-frequency real-time loop,
-`claude-haiku-4-5` is a cheaper, faster option — change `ANALYSIS_MODEL` in
-`src-tauri/src/lib.rs`.
+**Option B — Google Vertex AI** (uses a GCP service account / ADC, not an API
+key). There is no "Vertex API key" for Claude — auth is a Google Cloud OAuth
+token minted from a service account or Application Default Credentials:
+
+```
+export VERTEX_PROJECT_ID=my-gcp-project
+export VERTEX_REGION=global            # or us-east5, europe-west1, "us"/"eu", etc.
+# Credentials, pick one:
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+#   ...or run: gcloud auth application-default login
+npm run tauri dev
+```
+
+`ANTHROPIC_API_KEY` takes priority if both are set. The model is chosen from the
+dropdown in the app (Opus 4.8 / Sonnet 4.6 / Haiku 4.5); on Vertex the model id
+is mapped automatically.
 
 ## Roadmap
 
