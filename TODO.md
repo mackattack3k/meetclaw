@@ -28,6 +28,23 @@
 - Claude.ai Pro/Max OAuth was ruled out — restricted to Claude Code, rejected by
   the Messages API (Anthropic policy, Feb 2026).
 
+## Phase 2.5 — Personal notes (and as LLM context)
+- [ ] Editable notes pane in the UI (write your own notes during the meeting)
+- [ ] Keep notes in app state; persist for the session
+- [ ] Feed the user's notes into the Gemini context alongside the transcript,
+      so suggestions account for what the user already knows / cares about
+- [ ] Tune the prompt to use notes (e.g. "build on the user's notes; don't
+      re-suggest things they've already written down")
+- [ ] Include notes in any transcript/suggestions export
+
+## Phase 2.6 — Language support
+- [ ] Language selector in the UI (or an "auto-detect" option)
+- [ ] Show which language is being parsed/detected in the UI
+- [ ] Switch to a multilingual whisper model (`ggml-base`) — the current
+      `ggml-base.en` is English-only and can't do other languages
+- [ ] Pass the chosen language to whisper (`set_language`), or `None` to
+      auto-detect, and read the detected language back from the whisper state
+
 ## Phase 3 — Microphone & device selection
 - [ ] List available input devices (`cpal` enumerate)
 - [ ] Tauri command to return device list to the UI
