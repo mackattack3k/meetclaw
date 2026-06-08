@@ -36,6 +36,18 @@
 - [ ] Persist notes to disk across restarts
 - [ ] Include notes in any transcript/suggestions export
 
+## Phase 2.7 — Meeting library (save / resume) (done)
+- [x] Per-meeting folder under app data dir (`meeting.json`, `transcript.txt`,
+      `notes.md`, `suggestions.jsonl`, `audio.pcm` → `audio.wav` on stop)
+- [x] Meeting title field (autosaved)
+- [x] Continuous autosave: transcript, notes, audio, suggestions written live
+- [x] Audio capture to disk (16 kHz mono; PCM appended live, WAV on stop via `hound`)
+- [x] Library modal: list past meetings (title + date), open, delete
+- [x] Open a meeting = load it as current and resume recording into it
+- [ ] Audio playback for review (file is saved; no player UI yet)
+- [ ] Export a meeting (zip / share)
+- [ ] Confirm-before-delete
+
 ## Phase 2.6 — Language support
 - [ ] Language selector in the UI (or an "auto-detect" option)
 - [ ] Show which language is being parsed/detected in the UI

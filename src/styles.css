@@ -69,6 +69,114 @@ body {
   gap: 8px;
 }
 
+.title-input {
+  flex: 1;
+  margin: 0 16px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.title-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.btn-secondary {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* Library modal */
+.library {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.library.hidden {
+  display: none;
+}
+
+.library-panel {
+  width: min(560px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+}
+
+.library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.library-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.library-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.library-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.library-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.library-open:hover {
+  border-color: var(--accent);
+}
+
+.library-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.library-date {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.library-delete {
+  flex: 0 0 auto;
+}
+
 .select {
   background: var(--panel);
   color: var(--text);

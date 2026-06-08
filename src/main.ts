@@ -10,6 +10,27 @@ const transcriptEl = document.querySelector<HTMLElement>("#transcript")!;
 const suggestionsEl = document.querySelector<HTMLElement>("#suggestions")!;
 const modelSelect = document.querySelector<HTMLSelectElement>("#model-select")!;
 const notesEl = document.querySelector<HTMLTextAreaElement>("#notes")!;
+const titleInput = document.querySelector<HTMLInputElement>("#title-input")!;
+const libraryBtn = document.querySelector<HTMLButtonElement>("#library-btn")!;
+const newBtn = document.querySelector<HTMLButtonElement>("#new-btn")!;
+const libraryEl = document.querySelector<HTMLElement>("#library")!;
+const libraryListEl = document.querySelector<HTMLElement>("#library-list")!;
+const libraryCloseEl = document.querySelector<HTMLButtonElement>("#library-close")!;
+
+type MeetingMeta = {
+  id: string;
+  title: string;
+  created_at_ms: number;
+  updated_at_ms: number;
+};
+type MeetingDetail = {
+  id: string;
+  title: string;
+  created_at_ms: number;
+  transcript: string;
+  notes: string;
+  suggestions: string[][];
+};
 
 function setListening(on: boolean) {
   listening = on;
@@ -86,6 +107,130 @@ notesEl.addEventListener("input", () => {
     });
   }, 400);
 });
+
+// --- Meeting title, library, and persistence ---
+
+let titleTimer: number | undefined;
+titleInput.addEventListener("input", () => {
+  window.clearTimeout(titleTimer);
+  titleTimer = window.setTimeout(() => {
+    invoke("set_title", { title: titleInput.value }).catch((err) => {
+      statusText.textContent = `Error saving title: ${err}`;
+    });
+  }, 400);
+});
+
+function resetPanes() {
+  titleInput.value = "";
+  notesEl.value = "";
+  transcriptEl.replaceChildren(makePlaceholder("Transcript will appear here…"));
+  noteInSuggestions("Questions will appear here…");
+}
+
+function makePlaceholder(text: string): HTMLElement {
+  const p = document.createElement("p");
+  p.className = "placeholder";
+  p.textContent = text;
+  return p;
+}
+
+newBtn.addEventListener("click", async () => {
+  try {
+    await invoke("new_meeting");
+    resetPanes();
+  } catch (err) {
+    statusText.textContent = `Error creating meeting: ${err}`;
+  }
+});
+
+function showLibrary() {
+  libraryEl.classList.remove("hidden");
+}
+function hideLibrary() {
+  libraryEl.classList.add("hidden");
+}
+
+libraryCloseEl.addEventListener("click", hideLibrary);
+libraryEl.addEventListener("click", (e) => {
+  if (e.target === libraryEl) hideLibrary();
+});
+
+libraryBtn.addEventListener("click", async () => {
+  try {
+    const meetings = await invoke<MeetingMeta[]>("list_meetings");
+    renderLibrary(meetings);
+    showLibrary();
+  } catch (err) {
+    statusText.textContent = `Error loading library: ${err}`;
+  }
+});
+
+function renderLibrary(meetings: MeetingMeta[]) {
+  libraryListEl.replaceChildren();
+  if (meetings.length === 0) {
+    libraryListEl.appendChild(makePlaceholder("No saved meetings yet."));
+    return;
+  }
+  for (const m of meetings) {
+    const row = document.createElement("div");
+    row.className = "library-row";
+
+    const info = document.createElement("button");
+    info.className = "library-open";
+    const date = new Date(m.created_at_ms).toLocaleString();
+    const title = document.createElement("span");
+    title.className = "library-title";
+    title.textContent = m.title;
+    const when = document.createElement("span");
+    when.className = "library-date";
+    when.textContent = date;
+    info.append(title, when);
+    info.addEventListener("click", () => openMeeting(m.id));
+
+    const del = document.createElement("button");
+    del.className = "btn btn-secondary library-delete";
+    del.textContent = "Delete";
+    del.addEventListener("click", async () => {
+      try {
+        await invoke("delete_meeting", { id: m.id });
+        const meetings = await invoke<MeetingMeta[]>("list_meetings");
+        renderLibrary(meetings);
+      } catch (err) {
+        statusText.textContent = `Error deleting meeting: ${err}`;
+      }
+    });
+
+    row.append(info, del);
+    libraryListEl.appendChild(row);
+  }
+}
+
+async function openMeeting(id: string) {
+  try {
+    const d = await invoke<MeetingDetail>("load_meeting", { id });
+    titleInput.value = d.title;
+    notesEl.value = d.notes;
+
+    transcriptEl.replaceChildren();
+    const lines = d.transcript.split("\n").filter((l) => l.trim().length > 0);
+    if (lines.length === 0) {
+      transcriptEl.appendChild(makePlaceholder("Transcript will appear here…"));
+    } else {
+      for (const line of lines) appendTranscript(line);
+    }
+
+    if (d.suggestions.length > 0) {
+      renderSuggestions(d.suggestions[d.suggestions.length - 1]);
+    } else {
+      noteInSuggestions("Questions will appear here…");
+    }
+
+    hideLibrary();
+    statusText.textContent = "Loaded meeting. Press start to keep recording.";
+  } catch (err) {
+    statusText.textContent = `Error opening meeting: ${err}`;
+  }
+}
 
 // Backend events
 listen<{ text: string }>("transcript", (event) => {

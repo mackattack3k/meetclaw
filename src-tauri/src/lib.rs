@@ -1,7 +1,9 @@
 mod analyze;
 mod audio;
+mod meeting;
 mod transcribe;
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -29,6 +31,27 @@ struct AppState {
     running: Arc<AtomicBool>,
     model: Arc<Mutex<String>>,
     notes: Arc<Mutex<String>>,
+    meeting: Arc<Mutex<Option<CurrentMeeting>>>,
+}
+
+/// The meeting currently being recorded into / edited.
+#[derive(Clone)]
+struct CurrentMeeting {
+    id: String,
+    dir: PathBuf,
+}
+
+/// Return the current meeting, creating a fresh untitled one if there is none.
+fn ensure_meeting(app: &AppHandle, state: &AppState) -> Result<CurrentMeeting, String> {
+    let mut guard = state.meeting.lock().map_err(|_| "meeting lock poisoned".to_string())?;
+    if let Some(current) = guard.as_ref() {
+        return Ok(current.clone());
+    }
+    let meta = meeting::create(app, "")?;
+    let dir = meeting::meeting_dir(app, &meta.id)?;
+    let current = CurrentMeeting { id: meta.id, dir };
+    *guard = Some(current.clone());
+    Ok(current)
 }
 
 #[derive(Clone, Serialize)]
@@ -47,15 +70,26 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
     if state.running.swap(true, Ordering::SeqCst) {
         return Ok(());
     }
+    let current = match ensure_meeting(&app, &state) {
+        Ok(c) => c,
+        Err(e) => {
+            state.running.store(false, Ordering::SeqCst);
+            return Err(e);
+        }
+    };
+
     let running = state.running.clone();
     let model = state.model.clone();
     let notes = state.notes.clone();
+    let dir = current.dir;
 
     std::thread::spawn(move || {
-        if let Err(e) = run_pipeline(&app, running.clone(), model, notes) {
+        if let Err(e) = run_pipeline(&app, running.clone(), model, notes, dir.clone()) {
             let _ = app.emit("transcribe-error", e);
         }
         running.store(false, Ordering::SeqCst);
+        // Write the WAV from the accumulated PCM now that recording has stopped.
+        let _ = meeting::finalize_wav(&dir);
         let _ = app.emit("listening-stopped", ());
     });
 
@@ -77,8 +111,64 @@ fn set_model(model: String, state: State<AppState>) {
 #[tauri::command]
 fn set_notes(notes: String, state: State<AppState>) {
     if let Ok(mut current) = state.notes.lock() {
-        *current = notes;
+        *current = notes.clone();
     }
+    // Persist to the current meeting, if one exists.
+    if let Ok(guard) = state.meeting.lock() {
+        if let Some(current) = guard.as_ref() {
+            let _ = meeting::write_notes(&current.dir, &notes);
+        }
+    }
+}
+
+#[tauri::command]
+fn set_title(app: AppHandle, title: String, state: State<AppState>) -> Result<(), String> {
+    let current = ensure_meeting(&app, &state)?;
+    meeting::set_title(&current.dir, &title)
+}
+
+#[tauri::command]
+fn new_meeting(app: AppHandle, state: State<AppState>) -> Result<meeting::MeetingMeta, String> {
+    let meta = meeting::create(&app, "")?;
+    let dir = meeting::meeting_dir(&app, &meta.id)?;
+    *state.meeting.lock().map_err(|_| "meeting lock poisoned".to_string())? =
+        Some(CurrentMeeting { id: meta.id.clone(), dir });
+    if let Ok(mut notes) = state.notes.lock() {
+        notes.clear();
+    }
+    Ok(meta)
+}
+
+#[tauri::command]
+fn list_meetings(app: AppHandle) -> Result<Vec<meeting::MeetingMeta>, String> {
+    meeting::list(&app)
+}
+
+#[tauri::command]
+fn load_meeting(
+    app: AppHandle,
+    id: String,
+    state: State<AppState>,
+) -> Result<meeting::MeetingDetail, String> {
+    let detail = meeting::load(&app, &id)?;
+    let dir = meeting::meeting_dir(&app, &id)?;
+    *state.meeting.lock().map_err(|_| "meeting lock poisoned".to_string())? =
+        Some(CurrentMeeting { id: id.clone(), dir });
+    if let Ok(mut notes) = state.notes.lock() {
+        *notes = detail.notes.clone();
+    }
+    Ok(detail)
+}
+
+#[tauri::command]
+fn delete_meeting(app: AppHandle, id: String, state: State<AppState>) -> Result<(), String> {
+    meeting::delete(&app, &id)?;
+    if let Ok(mut guard) = state.meeting.lock() {
+        if guard.as_ref().map(|m| m.id == id).unwrap_or(false) {
+            *guard = None;
+        }
+    }
+    Ok(())
 }
 
 fn model_path() -> String {
@@ -96,11 +186,19 @@ fn recent_context(history: &[String], max_chars: usize) -> String {
     joined.chars().skip(char_count - max_chars).collect()
 }
 
+fn f32_to_i16(samples: &[f32]) -> Vec<i16> {
+    samples
+        .iter()
+        .map(|&s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)
+        .collect()
+}
+
 fn run_pipeline(
     app: &AppHandle,
     running: Arc<AtomicBool>,
     model: Arc<Mutex<String>>,
     notes: Arc<Mutex<String>>,
+    dir: PathBuf,
 ) -> Result<(), String> {
     // Load the model first so any error surfaces before we touch the mic.
     let transcriber = Transcriber::new(&model_path())?;
@@ -139,9 +237,13 @@ fn run_pipeline(
             let chunk: Vec<f32> = buffer.drain(..chunk_native_len).collect();
             let resampled = resample(&chunk, native_rate, TARGET_RATE);
 
+            // Tee the audio to disk (raw PCM, appended live) for the recording.
+            let _ = meeting::append_pcm(&dir, &f32_to_i16(&resampled));
+
             match transcriber.transcribe(&resampled) {
                 Ok(text) if !text.is_empty() => {
                     transcript_history.push(text.clone());
+                    let _ = meeting::append_transcript(&dir, &text);
                     let _ = app.emit("transcript", TranscriptPayload { text });
 
                     // Periodically ask Gemini for question suggestions. Run the
@@ -160,6 +262,7 @@ fn run_pipeline(
                             let user_notes =
                                 notes.lock().map(|n| n.clone()).unwrap_or_default();
                             let app_for_analysis = app.clone();
+                            let dir_for_analysis = dir.clone();
                             std::thread::spawn(move || {
                                 match analyze::suggest_questions(
                                     &key,
@@ -168,6 +271,10 @@ fn run_pipeline(
                                     &user_notes,
                                 ) {
                                     Ok(questions) if !questions.is_empty() => {
+                                        let _ = meeting::append_suggestion(
+                                            &dir_for_analysis,
+                                            &questions,
+                                        );
                                         let _ = app_for_analysis
                                             .emit("suggestions", SuggestionsPayload { questions });
                                     }
@@ -206,6 +313,7 @@ pub fn run() {
                 running: Arc::new(AtomicBool::new(false)),
                 model: Arc::new(Mutex::new(DEFAULT_MODEL.to_string())),
                 notes: Arc::new(Mutex::new(String::new())),
+                meeting: Arc::new(Mutex::new(None)),
             });
             Ok(())
         })
@@ -213,7 +321,12 @@ pub fn run() {
             start_listening,
             stop_listening,
             set_model,
-            set_notes
+            set_notes,
+            set_title,
+            new_meeting,
+            list_meetings,
+            load_meeting,
+            delete_meeting
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

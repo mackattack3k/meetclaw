@@ -68,6 +68,19 @@ If the key isn't set, transcription still works and the suggestions panel shows
 a "disabled" note. The model is chosen from the dropdown in the app
 (Gemini 3.5 Flash / 3.1 Flash-Lite / 2.5 Pro), live-switchable.
 
+## Meeting library
+
+Every meeting is saved continuously to a folder under the app data dir
+(`~/Library/Application Support/<bundle id>/meetings/<id>/`):
+
+- `meeting.json` — title + timestamps
+- `transcript.txt`, `notes.md`, `suggestions.jsonl`
+- `audio.pcm` (16 kHz mono, appended live) → `audio.wav` when you press Stop
+
+Give the meeting a title in the top bar. **Library** lists past meetings;
+opening one loads it as the current meeting and lets you **resume recording**
+into it. **New** starts a fresh meeting. See `src-tauri/src/meeting.rs`.
+
 ## Roadmap
 
 1. **(done)** Skeleton: mic → local transcript.
