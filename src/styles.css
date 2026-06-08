@@ -85,7 +85,30 @@ body {
   margin: 0;
 }
 
-.transcript {
+.content {
+  flex: 1;
+  display: flex;
+  gap: 14px;
+  min-height: 0;
+}
+
+.panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.scroll {
   flex: 1;
   overflow-y: auto;
   background: var(--panel);
@@ -94,12 +117,21 @@ body {
   padding: 16px;
 }
 
-.transcript .placeholder {
+.scroll .placeholder {
   color: var(--muted);
   font-style: italic;
 }
 
-.transcript .line {
+.scroll .line {
   margin: 0 0 10px;
   line-height: 1.5;
+}
+
+.suggestion {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: rgba(109, 139, 255, 0.1);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  line-height: 1.45;
 }

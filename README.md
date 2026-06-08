@@ -53,12 +53,30 @@ macOS will ask for microphone permission the first time you press
   as a Tauri resource is needed for a distributable build.
 - CPU inference. The `metal` feature of `whisper-rs` would speed this up.
 
+## AI question suggestions (Phase 2)
+
+While listening, MeetClaw sends the rolling transcript to the Claude API every
+~20 seconds and shows up to 3 questions a sharp third participant might ask, in
+the right-hand panel. See `src-tauri/src/analyze.rs`.
+
+Set your API key before launching (otherwise transcription still works, but the
+suggestions panel shows a "disabled" note):
+
+```
+export ANTHROPIC_API_KEY=sk-ant-...
+npm run tauri dev
+```
+
+The model defaults to `claude-opus-4-8`. For this high-frequency real-time loop,
+`claude-haiku-4-5` is a cheaper, faster option — change `ANALYSIS_MODEL` in
+`src-tauri/src/lib.rs`.
+
 ## Roadmap
 
 1. **(done)** Skeleton: mic → local transcript.
-2. AI layer: feed the rolling transcript to the Claude API and surface
-   "questions a third participant might ask."
-3. System audio capture for digital meetings (Zoom/Meet/Teams) via
+2. **(done)** AI layer: rolling transcript → Claude → suggested questions.
+3. Microphone / input device selection in the UI.
+4. System audio capture for digital meetings (Zoom/Meet/Teams) via
    ScreenCaptureKit or a virtual audio device (BlackHole/Loopback).
-4. Camera/whiteboard capture at ~1 Hz into a vision model.
-5. Screen capture for digital meetings.
+5. Camera/whiteboard capture at ~1 Hz into a vision model.
+6. Screen capture for digital meetings.

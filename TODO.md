@@ -9,13 +9,16 @@
 - [x] Start/Stop UI with live transcript pane
 - [x] macOS mic permission (`Info.plist`)
 
-## Phase 2 — AI question suggestions (in progress)
-- [ ] Anthropic API client in Rust (`reqwest`), key from `ANTHROPIC_API_KEY`
-- [ ] Rolling transcript buffer; trigger analysis every N seconds / N segments
-- [ ] Prompt: "act as a quiet third participant, suggest questions to ask"
-- [ ] Emit `suggestion` events to the UI
-- [ ] UI panel for suggested questions (separate from transcript)
-- [ ] Handle missing/invalid API key gracefully in the UI
+## Phase 2 — AI question suggestions (done)
+- [x] Anthropic API client in Rust (`reqwest`), key from `ANTHROPIC_API_KEY`
+- [x] Rolling transcript buffer; trigger analysis every ~20s
+- [x] Prompt: "act as a quiet third participant, suggest questions to ask"
+- [x] Structured output (`output_config.format`) for guaranteed-parseable JSON
+- [x] Emit `suggestions` events to the UI
+- [x] UI panel for suggested questions (separate from transcript)
+- [x] Handle missing API key gracefully in the UI (`analysis-disabled` note)
+- [ ] Pick final model (default `claude-opus-4-8`; consider `claude-haiku-4-5` for cost/latency)
+- [ ] Tune trigger cadence (time vs. number of new segments)
 
 ## Phase 3 — Microphone & device selection
 - [ ] List available input devices (`cpal` enumerate)

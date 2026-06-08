@@ -20,9 +20,21 @@
 
       <p id="status-text" class="status">Idle. Press start to begin transcribing.</p>
 
-      <section class="transcript" id="transcript" aria-live="polite">
-        <p class="placeholder">Transcript will appear here…</p>
-      </section>
+      <div class="content">
+        <section class="panel">
+          <h2 class="panel-title">Transcript</h2>
+          <div class="scroll" id="transcript" aria-live="polite">
+            <p class="placeholder">Transcript will appear here…</p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2 class="panel-title">Suggested questions</h2>
+          <div class="scroll" id="suggestions" aria-live="polite">
+            <p class="placeholder">Questions will appear here…</p>
+          </div>
+        </section>
+      </div>
     </main>
   </body>
 </html>

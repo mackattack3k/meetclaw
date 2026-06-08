@@ -7,6 +7,7 @@ const toggleBtn = document.querySelector<HTMLButtonElement>("#toggle-btn")!;
 const statusText = document.querySelector<HTMLParagraphElement>("#status-text")!;
 const statusDot = document.querySelector<HTMLSpanElement>("#status-dot")!;
 const transcriptEl = document.querySelector<HTMLElement>("#transcript")!;
+const suggestionsEl = document.querySelector<HTMLElement>("#suggestions")!;
 
 function setListening(on: boolean) {
   listening = on;
@@ -26,6 +27,24 @@ function appendTranscript(text: string) {
   line.textContent = text;
   transcriptEl.appendChild(line);
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+
+// Replace the suggestions panel with the latest set of questions.
+function renderSuggestions(questions: string[]) {
+  suggestionsEl.replaceChildren();
+  for (const q of questions) {
+    const item = document.createElement("p");
+    item.className = "suggestion";
+    item.textContent = q;
+    suggestionsEl.appendChild(item);
+  }
+}
+
+function noteInSuggestions(message: string) {
+  const note = document.createElement("p");
+  note.className = "placeholder";
+  note.textContent = message;
+  suggestionsEl.replaceChildren(note);
 }
 
 toggleBtn.addEventListener("click", async () => {
@@ -54,4 +73,17 @@ listen("listening-stopped", () => setListening(false));
 listen<string>("transcribe-error", (event) => {
   statusText.textContent = `Error: ${event.payload}`;
   setListening(false);
+});
+
+// Phase 2: Claude question suggestions
+listen<{ questions: string[] }>("suggestions", (event) => {
+  renderSuggestions(event.payload.questions);
+});
+
+listen<string>("analysis-disabled", (event) => {
+  noteInSuggestions(event.payload);
+});
+
+listen<string>("analysis-error", (event) => {
+  statusText.textContent = `Analysis error: ${event.payload}`;
 });

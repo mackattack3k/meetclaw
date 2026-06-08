@@ -1,10 +1,11 @@
+mod analyze;
 mod audio;
 mod transcribe;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -16,6 +17,15 @@ const TARGET_RATE: u32 = 16_000;
 // How many seconds of audio to buffer before running a transcription pass.
 const CHUNK_SECONDS: f32 = 5.0;
 
+// Claude analysis (Phase 2).
+// Default to the most capable model. For this high-frequency real-time loop,
+// "claude-haiku-4-5" is a cheaper, faster alternative — swap the string below.
+const ANALYSIS_MODEL: &str = "claude-opus-4-8";
+// How often (at most) to ask Claude for fresh question suggestions.
+const ANALYSIS_INTERVAL_SECONDS: u64 = 20;
+// How much recent transcript (in characters) to send as context.
+const MAX_CONTEXT_CHARS: usize = 4000;
+
 struct AppState {
     running: Arc<AtomicBool>,
 }
@@ -23,6 +33,11 @@ struct AppState {
 #[derive(Clone, Serialize)]
 struct TranscriptPayload {
     text: String,
+}
+
+#[derive(Clone, Serialize)]
+struct SuggestionsPayload {
+    questions: Vec<String>,
 }
 
 #[tauri::command]
@@ -53,6 +68,17 @@ fn model_path() -> String {
     format!("{}/models/ggml-base.en.bin", env!("CARGO_MANIFEST_DIR"))
 }
 
+/// Join the transcript history and keep only the most recent `max_chars`
+/// characters (char-safe, so it never splits a multi-byte character).
+fn recent_context(history: &[String], max_chars: usize) -> String {
+    let joined = history.join(" ");
+    let char_count = joined.chars().count();
+    if char_count <= max_chars {
+        return joined;
+    }
+    joined.chars().skip(char_count - max_chars).collect()
+}
+
 fn run_pipeline(app: &AppHandle, running: Arc<AtomicBool>) -> Result<(), String> {
     // Load the model first so any error surfaces before we touch the mic.
     let transcriber = Transcriber::new(&model_path())?;
@@ -63,6 +89,17 @@ fn run_pipeline(app: &AppHandle, running: Arc<AtomicBool>) -> Result<(), String>
 
     let chunk_native_len = (native_rate as f32 * CHUNK_SECONDS) as usize;
     let mut buffer: Vec<f32> = Vec::with_capacity(chunk_native_len);
+
+    // Phase 2: rolling transcript + periodic Claude analysis.
+    let api_key = std::env::var("ANTHROPIC_API_KEY").ok();
+    if api_key.is_none() {
+        let _ = app.emit(
+            "analysis-disabled",
+            "ANTHROPIC_API_KEY not set — question suggestions are off.",
+        );
+    }
+    let mut transcript_history: Vec<String> = Vec::new();
+    let mut last_analysis = Instant::now();
 
     let _ = app.emit("listening-started", ());
 
@@ -81,7 +118,33 @@ fn run_pipeline(app: &AppHandle, running: Arc<AtomicBool>) -> Result<(), String>
 
             match transcriber.transcribe(&resampled) {
                 Ok(text) if !text.is_empty() => {
+                    transcript_history.push(text.clone());
                     let _ = app.emit("transcript", TranscriptPayload { text });
+
+                    // Periodically ask Claude for question suggestions. Run the
+                    // call on its own thread so transcription keeps flowing.
+                    if let Some(key) = &api_key {
+                        if last_analysis.elapsed()
+                            >= Duration::from_secs(ANALYSIS_INTERVAL_SECONDS)
+                        {
+                            last_analysis = Instant::now();
+                            let context = recent_context(&transcript_history, MAX_CONTEXT_CHARS);
+                            let key = key.clone();
+                            let app_for_analysis = app.clone();
+                            std::thread::spawn(move || {
+                                match analyze::suggest_questions(&key, ANALYSIS_MODEL, &context) {
+                                    Ok(questions) if !questions.is_empty() => {
+                                        let _ = app_for_analysis
+                                            .emit("suggestions", SuggestionsPayload { questions });
+                                    }
+                                    Ok(_) => {} // nothing useful this round
+                                    Err(e) => {
+                                        let _ = app_for_analysis.emit("analysis-error", e);
+                                    }
+                                }
+                            });
+                        }
+                    }
                 }
                 Ok(_) => {} // silence / no speech
                 Err(e) => {
