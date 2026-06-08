@@ -1,6 +1,7 @@
 mod analyze;
 mod audio;
 mod meeting;
+mod mixer;
 mod settings;
 mod syscap;
 mod transcribe;
@@ -40,6 +41,7 @@ const DEFAULT_AUDIO_SOURCE: &str = "mic";
 enum Capture {
     Mic(audio::AudioCapture),
     System(syscap::SystemAudioCapture),
+    Mixed(mixer::MixedCapture),
 }
 
 fn syscap_path() -> String {
@@ -394,13 +396,22 @@ fn run_pipeline(
 
     let (tx, rx) = mpsc::channel::<Vec<f32>>();
     // `capture` is held for the duration so the stream/helper stays alive.
-    let (capture, native_rate) = if source == "system" {
-        let cap = syscap::SystemAudioCapture::start(tx, &syscap_path(), app.clone())?;
-        (Capture::System(cap), syscap::SAMPLE_RATE)
-    } else {
-        let cap = AudioCapture::start(tx, device.as_deref())?;
-        let rate = cap.sample_rate;
-        (Capture::Mic(cap), rate)
+    let (capture, native_rate) = match source.as_str() {
+        "system" => {
+            let cap = syscap::SystemAudioCapture::start(tx, &syscap_path(), app.clone())?;
+            (Capture::System(cap), syscap::SAMPLE_RATE)
+        }
+        "both" => {
+            // The mixer emits already-resampled 16 kHz audio.
+            let cap =
+                mixer::MixedCapture::start(tx, device.as_deref(), &syscap_path(), app.clone())?;
+            (Capture::Mixed(cap), TARGET_RATE)
+        }
+        _ => {
+            let cap = AudioCapture::start(tx, device.as_deref())?;
+            let rate = cap.sample_rate;
+            (Capture::Mic(cap), rate)
+        }
     };
 
     let min_samples = (native_rate as f32 * MIN_CHUNK_SECONDS) as usize;

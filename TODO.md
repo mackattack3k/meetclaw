@@ -98,9 +98,10 @@
       reader (`src-tauri/src/syscap.rs`)
 - [x] "Audio source" setting: Microphone vs System audio
 - [x] Surface the Screen Recording permission error to the UI (`syscap-status`)
-- [ ] Mix mic + system audio (capture BOTH you and them at once) — needs
-      summing two async streams with drift handling; currently it's one or the
-      other
+- [x] Mix mic + system audio (capture BOTH at once) — "Both" source mode for
+      hybrid meetings (you + room on mic, remote participants on system audio).
+      Mic-driven mixer (`src-tauri/src/mixer.rs`): resample both to 16 kHz, sum
+      onto each mic chunk, silence-fill when the call is quiet.
 - [ ] Bundle the Swift helper as a Tauri sidecar for distributable builds
       (today it's spawned from `src-tauri/binaries/`, built via
       `src-tauri/syscap/build.sh`)

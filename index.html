@@ -133,12 +133,14 @@
           <label class="setting">
             <span class="setting-label">Audio source</span>
             <select id="source-select" class="select">
-              <option value="mic">Microphone (you)</option>
-              <option value="system">System audio (others, for digital meetings)</option>
+              <option value="mic">Microphone (you + the room)</option>
+              <option value="system">System audio (remote participants)</option>
+              <option value="both">Both — hybrid meeting (mic + system)</option>
             </select>
             <span class="setting-hint">
-              System audio captures what other apps play (e.g. remote
-              participants). Needs Screen Recording permission.
+              "Both" mixes your mic (you and anyone in the room) with system
+              audio (remote participants). System audio needs Screen Recording
+              permission.
             </span>
           </label>
 
