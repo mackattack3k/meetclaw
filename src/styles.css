@@ -19,9 +19,10 @@
 
   --radius: 14px;
   --radius-sm: 9px;
-  --font-display: "Bricolage Grotesque", "Hanken Grotesk", system-ui, sans-serif;
-  --font-ui: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --font-display: "Bricolage Grotesque Variable", "Hanken Grotesk Variable",
+    system-ui, sans-serif;
+  --font-ui: "Hanken Grotesk Variable", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", monospace;
 }
 
 * {
