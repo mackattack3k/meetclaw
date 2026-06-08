@@ -57,11 +57,19 @@
 - [ ] Export a meeting (zip / share)
 
 ## Phase 2.6 — Language support (done)
-- [x] Language selector in Settings (auto-detect + ~20 languages)
-- [x] Show the detected/active language as a chip in the toolbar
+- [x] Language selector in the console rail (auto-detect + ~20 languages)
+- [x] Show the detected/active language next to the Lang selector
 - [x] Switched to the multilingual `ggml-base` model
-- [x] Pass the chosen language to whisper (or "auto"), read the detected
-      language back via `full_lang_id_from_state` + `get_lang_str_full`
+- [x] Confidence + hysteresis auto-detect: ignore detections under 0.5 conf,
+      require a new language to persist 2 chunks before switching. Rejects
+      one-off mis-detects (the "Welsh"/"Finnish" blips) while still following a
+      genuine mid-meeting language switch. Verified against real recordings.
+- [x] Feed recent transcript as whisper `initial_prompt` for live continuity.
+- [ ] Per-segment multilingual FINAL transcript — the whole-file final pass
+      still picks one language for the whole recording, so a bilingual meeting's
+      minority-language parts get mis-transcribed in the final tier. (Live tier
+      handles sequential switches via hysteresis; final pass would need to
+      segment by language and transcribe each separately.)
 
 ## Phase 3 — Microphone & device selection (done)
 - [x] List available input devices (`cpal` enumerate)

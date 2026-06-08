@@ -27,6 +27,23 @@ fn main() {
 
     let ctx = WhisperContext::new_with_params(&model, WhisperContextParameters::default())
         .expect("load model");
+
+    // Language detection (the same path the live hysteresis uses).
+    {
+        let mut det = ctx.create_state().expect("state");
+        det.pcm_to_mel(&samples, 4).expect("mel");
+        if let Ok((id, probs)) = det.lang_detect(0, 4) {
+            eprintln!(
+                "lang_detect: {} (confidence {:.3})",
+                whisper_rs::get_lang_str(id).unwrap_or("?"),
+                probs.get(id as usize).copied().unwrap_or(0.0)
+            );
+        }
+    }
+    if std::env::args().any(|a| a == "detect-only") {
+        return;
+    }
+
     let mut state = ctx.create_state().expect("state");
 
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });

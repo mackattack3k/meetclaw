@@ -32,6 +32,11 @@ const SILENCE_RMS_THRESHOLD: f32 = 0.01; // below this RMS counts as silence
 const DEFAULT_MODEL: &str = "gemini-3.5-flash";
 // Transcription language: "auto" (detect) or a 2-letter code like "en".
 const DEFAULT_LANGUAGE: &str = "auto";
+// Auto-detect hysteresis: ignore detections below this confidence, and require a
+// new language to persist this many chunks before switching (rejects one-off
+// mis-detections while still following genuine language switches mid-meeting).
+const LANG_MIN_CONFIDENCE: f32 = 0.5;
+const LANG_SWITCH_CHUNKS: usize = 2;
 // Audio source: "mic" or "system" (ScreenCaptureKit, for digital meetings).
 const DEFAULT_AUDIO_SOURCE: &str = "mic";
 
@@ -167,7 +172,7 @@ fn finalize_transcript(app: &AppHandle, dir: &std::path::Path, language: &Arc<Mu
         .map(|l| l.clone())
         .unwrap_or_else(|_| DEFAULT_LANGUAGE.to_string());
 
-    if let Ok(result) = transcriber.transcribe(&samples, &lang) {
+    if let Ok(result) = transcriber.transcribe(&samples, &lang, "") {
         let text = result.text.trim().to_string();
         if !text.is_empty() {
             let _ = meeting::overwrite_transcript(dir, &text);
@@ -462,6 +467,10 @@ fn run_pipeline(
     let mut transcript_history: Vec<String> = Vec::new();
     let mut last_analysis = Instant::now();
     let mut last_lang: Option<String> = None;
+    // Auto-detect hysteresis state (only used when language = "auto").
+    let mut cur_lang: Option<(String, String)> = None; // (code, full name)
+    let mut pending_lang: Option<String> = None;
+    let mut pending_count: usize = 0;
 
     let _ = app.emit("listening-started", ());
 
@@ -473,17 +482,63 @@ fn run_pipeline(
         if !speech {
             return; // silence: recorded, but nothing to transcribe
         }
-        let lang = language
+        let user_setting = language
             .lock()
             .map(|l| l.clone())
             .unwrap_or_else(|_| DEFAULT_LANGUAGE.to_string());
-        match transcriber.transcribe(&resampled, &lang) {
+
+        // Decide the language for this chunk. Explicit setting wins; "auto" uses
+        // confidence + hysteresis so a one-off mis-detect can't flip us, but a
+        // sustained language switch does.
+        let chosen = if user_setting != "auto" {
+            cur_lang = None;
+            pending_lang = None;
+            pending_count = 0;
+            user_setting.clone()
+        } else {
+            if let Some((code, full, conf)) = transcriber.detect_language(&resampled) {
+                if conf >= LANG_MIN_CONFIDENCE {
+                    match &cur_lang {
+                        None => cur_lang = Some((code, full)),
+                        Some((cur_code, _)) if *cur_code == code => {
+                            pending_lang = None;
+                            pending_count = 0;
+                        }
+                        Some(_) => {
+                            if pending_lang.as_deref() == Some(code.as_str()) {
+                                pending_count += 1;
+                            } else {
+                                pending_lang = Some(code.clone());
+                                pending_count = 1;
+                            }
+                            if pending_count >= LANG_SWITCH_CHUNKS {
+                                cur_lang = Some((code, full));
+                                pending_lang = None;
+                                pending_count = 0;
+                            }
+                        }
+                    }
+                }
+            }
+            cur_lang
+                .as_ref()
+                .map(|(c, _)| c.clone())
+                .unwrap_or_else(|| "auto".to_string())
+        };
+
+        let prompt = recent_context(&transcript_history, 200);
+        match transcriber.transcribe(&resampled, &chosen, &prompt) {
             Ok(t) if !t.text.is_empty() => {
-                // Surface the detected/used language when it changes.
-                if let Some(detected) = &t.language {
-                    if last_lang.as_deref() != Some(detected.as_str()) {
-                        last_lang = Some(detected.clone());
-                        let _ = app.emit("language-detected", detected.clone());
+                // Surface the active language when it changes.
+                let display = if user_setting == "auto" {
+                    cur_lang.as_ref().map(|(_, full)| full.clone())
+                } else {
+                    t.language.clone()
+                };
+                if let Some(name) = display {
+                    if last_lang.as_deref() != Some(name.as_str()) {
+                        last_lang = Some(name.clone());
+                        let _ = app.emit("language-detected", name);
                     }
                 }
                 let text = t.text;

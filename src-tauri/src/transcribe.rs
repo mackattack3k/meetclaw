@@ -20,10 +20,28 @@ impl Transcriber {
         Ok(Self { ctx })
     }
 
-    /// Transcribe one window of 16 kHz mono audio. `language` is a 2-letter code
-    /// (e.g. "en") or "auto" to let whisper detect it. Returns the text plus the
-    /// language whisper used/detected.
-    pub fn transcribe(&self, samples: &[f32], language: &str) -> Result<Transcription, String> {
+    /// Detect the spoken language of a window without transcribing it.
+    /// Returns (2-letter code, full name, confidence 0..1).
+    pub fn detect_language(&self, samples: &[f32]) -> Option<(String, String, f32)> {
+        let mut state = self.ctx.create_state().ok()?;
+        state.pcm_to_mel(samples, 4).ok()?;
+        let (id, probs) = state.lang_detect(0, 4).ok()?;
+        let conf = probs.get(id as usize).copied().unwrap_or(0.0);
+        let code = whisper_rs::get_lang_str(id)?.to_string();
+        let full = whisper_rs::get_lang_str_full(id).unwrap_or("").to_string();
+        Some((code, full, conf))
+    }
+
+    /// Transcribe one window of 16 kHz mono audio.
+    /// - `language`: "auto" to detect, or a 2-letter code to force.
+    /// - `prompt`: recent transcript text fed as context for continuity (live
+    ///   tier); pass "" for a cold pass.
+    pub fn transcribe(
+        &self,
+        samples: &[f32],
+        language: &str,
+        prompt: &str,
+    ) -> Result<Transcription, String> {
         let mut state = self
             .ctx
             .create_state()
@@ -31,6 +49,9 @@ impl Transcriber {
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_language(Some(language));
+        if !prompt.trim().is_empty() {
+            params.set_initial_prompt(prompt);
+        }
         params.set_translate(false);
         params.set_print_special(false);
         params.set_print_progress(false);
