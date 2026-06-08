@@ -7,6 +7,14 @@ pub struct Transcriber {
     ctx: WhisperContext,
 }
 
+/// Whisper emits non-speech markers as whole segments, e.g. "[BLANK_AUDIO]",
+/// "[_BEG_]", "(silence)", "[Music]". Drop any segment that is just one.
+fn is_marker(s: &str) -> bool {
+    s.is_empty()
+        || (s.starts_with('[') && s.ends_with(']'))
+        || (s.starts_with('(') && s.ends_with(')'))
+}
+
 pub struct Transcription {
     pub text: String,
     /// Full language name (e.g. "english"), detected when `language` is "auto".
@@ -69,7 +77,13 @@ impl Transcriber {
         let mut text = String::new();
         for i in 0..num_segments {
             if let Ok(seg) = state.full_get_segment_text(i) {
-                text.push_str(seg.trim());
+                let s = seg.trim();
+                // Skip whisper's blank/non-speech markers, e.g. "[BLANK_AUDIO]",
+                // "[_BEG_]", "(silence)", "[Music]".
+                if is_marker(s) {
+                    continue;
+                }
+                text.push_str(s);
                 text.push(' ');
             }
         }
