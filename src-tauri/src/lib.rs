@@ -31,6 +31,9 @@ const SILENCE_HANG_SECONDS: f32 = 0.4; // how much quiet marks the end of a phra
 const SILENCE_PEAK_DECAY: f32 = 0.995; // per audio block
 const SILENCE_REL_FRACTION: f32 = 0.12; // below 12% of recent peak = silence
 const SILENCE_ABS_FLOOR: f32 = 0.0015; // never call anything above this silence-floor noise
+// A chunk is only transcribed if its loudest moment reaches this fraction of the
+// loudest speech heard so far — otherwise it's silence/noise and is skipped.
+const SPEECH_MIN_FRACTION: f32 = 0.12;
 // Whisper struggles on very quiet audio (mis-detects language, hallucinates), so
 // boost quiet chunks toward this peak before transcription.
 const ASR_TARGET_PEAK: f32 = 0.3;
@@ -502,8 +505,9 @@ fn run_pipeline(
     let silence_hang_samples = (native_rate as f32 * SILENCE_HANG_SECONDS) as usize;
     let mut buffer: Vec<f32> = Vec::new();
     let mut silence_run: usize = 0;
-    let mut had_speech = false;
     let mut peak_level: f32 = 0.0;
+    let mut speech_ceiling: f32 = 0.0; // loudest speech heard so far (no decay)
+    let mut chunk_peak: f32 = 0.0; // loudest moment in the current chunk
 
     // Phase 2: rolling transcript + periodic Gemini analysis.
     let api_key = analyze::api_key();
@@ -653,12 +657,13 @@ fn run_pipeline(
                 // Adaptive silence: threshold relative to the recent loudest level.
                 let level = rms(&samples);
                 peak_level = (peak_level * SILENCE_PEAK_DECAY).max(level);
+                speech_ceiling = speech_ceiling.max(level);
+                chunk_peak = chunk_peak.max(level);
                 let threshold = (peak_level * SILENCE_REL_FRACTION).max(SILENCE_ABS_FLOOR);
                 if level < threshold {
                     silence_run += samples.len();
                 } else {
                     silence_run = 0;
-                    had_speech = true;
                 }
                 buffer.extend_from_slice(&samples);
 
@@ -668,9 +673,11 @@ fn run_pipeline(
                 let too_long = buffer.len() >= max_samples;
                 if long_enough && (at_pause || too_long) {
                     let chunk = std::mem::take(&mut buffer);
-                    let speech = had_speech;
+                    // Only transcribe if the chunk has real speech, not noise.
+                    let speech =
+                        chunk_peak >= (speech_ceiling * SPEECH_MIN_FRACTION).max(SILENCE_ABS_FLOOR);
                     silence_run = 0;
-                    had_speech = false;
+                    chunk_peak = 0.0;
                     process_chunk(chunk, speech);
                 }
             }
@@ -682,7 +689,8 @@ fn run_pipeline(
     // Flush whatever is left so the tail of the meeting isn't lost.
     if !buffer.is_empty() {
         let chunk = std::mem::take(&mut buffer);
-        process_chunk(chunk, had_speech);
+        let speech = chunk_peak >= (speech_ceiling * SPEECH_MIN_FRACTION).max(SILENCE_ABS_FLOOR);
+        process_chunk(chunk, speech);
     }
 
     // Release the closure's borrows so we can read the established language.
