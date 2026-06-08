@@ -47,6 +47,8 @@
 - [ ] Audio playback for review (file is saved; no player UI yet)
 - [ ] Export a meeting (zip / share)
 - [ ] Confirm-before-delete
+- [ ] Configurable save location on disk (folder picker + persisted setting)
+- [x] Auto-generate a title (Gemini) on stop when still untitled
 
 ## Phase 2.6 — Language support
 - [ ] Language selector in the UI (or an "auto-detect" option)
