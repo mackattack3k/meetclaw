@@ -401,6 +401,14 @@ fn load_meeting(
 }
 
 #[tauri::command]
+fn read_meeting_audio(app: AppHandle, id: String) -> Result<tauri::ipc::Response, String> {
+    let dir = meeting::meeting_dir(&app, &id)?;
+    let bytes = std::fs::read(dir.join("audio.wav"))
+        .map_err(|e| format!("no audio for this meeting: {e}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
 fn delete_meeting(app: AppHandle, id: String, state: State<AppState>) -> Result<(), String> {
     meeting::delete(&app, &id)?;
     if let Ok(mut guard) = state.meeting.lock() {
@@ -762,6 +770,7 @@ pub fn run() {
             list_meetings,
             load_meeting,
             delete_meeting,
+            read_meeting_audio,
             list_devices,
             set_device,
             get_settings,

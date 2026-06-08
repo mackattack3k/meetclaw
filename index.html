@@ -103,11 +103,20 @@
         <section class="panel">
           <div class="panel-head">
             <span class="panel-title">Transcript</span>
+            <div id="player" class="player hidden">
+              <button id="play-btn" class="play-btn" aria-label="Play / pause">
+                <svg class="i-play" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+                <svg class="i-pause" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg>
+              </button>
+              <input id="seek" class="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek" />
+              <span id="time" class="player-time">0:00</span>
+            </div>
           </div>
           <div class="scroll" id="transcript" aria-live="polite">
             <p class="placeholder">Transcript will appear here…</p>
           </div>
         </section>
+        <audio id="audio" preload="metadata"></audio>
 
         <section class="panel">
           <div class="panel-head">

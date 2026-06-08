@@ -49,11 +49,11 @@
 - [x] Confirm-before-delete (native dialog)
 - [x] Configurable save location on disk (Settings → folder picker, persisted)
 - [x] Auto-generate a title (Gemini) on stop when still untitled
-- [ ] Audio playback of saved meetings — when opening a meeting from the
-      Library, show a player for its `audio.wav`. Serve the file with Tauri's
-      asset protocol (`convertFileSrc`) into an `<audio controls>` element;
-      add a command returning the meeting's audio path. Stretch: scrub the
-      transcript in sync with playback (we have time-aligned 16 kHz audio).
+- [x] Audio playback of saved meetings — opening one from the Library shows a
+      custom player (play/pause, scrubber, time) in the transcript header.
+      `read_meeting_audio` returns the WAV bytes; the UI plays it via a Blob URL.
+- [ ] Stretch: highlight/scrub the transcript in sync with playback (we have
+      time-aligned 16 kHz audio).
 - [ ] Export a meeting (zip / share)
 
 ## Phase 2.6 — Language support (done)

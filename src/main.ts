@@ -33,6 +33,11 @@ const resetDirBtn = document.querySelector<HTMLButtonElement>("#reset-dir")!;
 const apiKeyEl = document.querySelector<HTMLInputElement>("#api-key")!;
 const saveKeyBtn = document.querySelector<HTMLButtonElement>("#save-key")!;
 const keyStatusEl = document.querySelector<HTMLSpanElement>("#key-status")!;
+const playerEl = document.querySelector<HTMLElement>("#player")!;
+const playBtn = document.querySelector<HTMLButtonElement>("#play-btn")!;
+const seekEl = document.querySelector<HTMLInputElement>("#seek")!;
+const timeEl = document.querySelector<HTMLSpanElement>("#time")!;
+const audioEl = document.querySelector<HTMLAudioElement>("#audio")!;
 
 type SettingsView = {
   model: string;
@@ -104,6 +109,7 @@ toggleBtn.addEventListener("click", async () => {
       await invoke("stop_listening");
       setListening(false);
     } else {
+      clearPlayer();
       setListening(true);
       await invoke("start_listening");
     }
@@ -287,7 +293,68 @@ function resetPanes() {
   notesEl.value = "";
   transcriptEl.replaceChildren(makePlaceholder("Transcript will appear here…"));
   noteInSuggestions("Questions will appear here…");
+  clearPlayer();
 }
+
+// --- Audio playback of a loaded meeting ---
+
+let audioUrl: string | null = null;
+
+function fmtTime(t: number): string {
+  if (!isFinite(t) || t < 0) return "0:00";
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function clearPlayer() {
+  audioEl.pause();
+  audioEl.removeAttribute("src");
+  audioEl.load();
+  if (audioUrl) {
+    URL.revokeObjectURL(audioUrl);
+    audioUrl = null;
+  }
+  playerEl.classList.add("hidden");
+  playBtn.classList.remove("playing");
+  seekEl.value = "0";
+}
+
+async function loadAudio(id: string) {
+  try {
+    const buf = await invoke<ArrayBuffer>("read_meeting_audio", { id });
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+    audioEl.src = audioUrl;
+    seekEl.value = "0";
+    timeEl.textContent = "0:00";
+    playerEl.classList.remove("hidden");
+  } catch {
+    clearPlayer(); // meeting has no saved audio yet
+  }
+}
+
+playBtn.addEventListener("click", () => {
+  if (audioEl.paused) void audioEl.play();
+  else audioEl.pause();
+});
+audioEl.addEventListener("play", () => playBtn.classList.add("playing"));
+audioEl.addEventListener("pause", () => playBtn.classList.remove("playing"));
+audioEl.addEventListener("ended", () => playBtn.classList.remove("playing"));
+audioEl.addEventListener("loadedmetadata", () => {
+  timeEl.textContent = fmtTime(audioEl.duration);
+});
+audioEl.addEventListener("timeupdate", () => {
+  if (audioEl.duration > 0) {
+    seekEl.value = String((audioEl.currentTime / audioEl.duration) * 1000);
+  }
+  timeEl.textContent = fmtTime(audioEl.currentTime);
+});
+seekEl.addEventListener("input", () => {
+  if (audioEl.duration > 0) {
+    audioEl.currentTime = (Number(seekEl.value) / 1000) * audioEl.duration;
+  }
+});
 
 function makePlaceholder(text: string): HTMLElement {
   const p = document.createElement("p");
@@ -392,8 +459,9 @@ async function openMeeting(id: string) {
       noteInSuggestions("Questions will appear here…");
     }
 
+    void loadAudio(id);
     hideLibrary();
-    statusText.textContent = "Loaded meeting. Press start to keep recording.";
+    statusText.textContent = "Loaded meeting. Press play to listen, or start to keep recording.";
   } catch (err) {
     statusText.textContent = `Error opening meeting: ${err}`;
   }

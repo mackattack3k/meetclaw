@@ -393,6 +393,81 @@ body::after {
   background: var(--muted);
 }
 
+/* ---- Audio player (in the transcript panel head) ---- */
+.player {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  margin-left: 14px;
+}
+
+.player.hidden {
+  display: none;
+}
+
+.play-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: #1a1205;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.08s ease;
+}
+
+.play-btn:hover {
+  filter: brightness(1.08);
+}
+.play-btn:active {
+  transform: scale(0.94);
+}
+
+.play-btn .i-pause {
+  display: none;
+}
+.play-btn.playing .i-play {
+  display: none;
+}
+.play-btn.playing .i-pause {
+  display: inline;
+}
+
+.seek {
+  flex: 1;
+  min-width: 40px;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg-elev);
+  cursor: pointer;
+}
+
+.player-time {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  min-width: 30px;
+  text-align: right;
+}
+
 /* ---- Content / panels ---- */
 .content {
   flex: 1;
