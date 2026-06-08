@@ -18,14 +18,11 @@
 - [x] UI panel for suggested questions (separate from transcript)
 - [x] Handle missing API key gracefully in the UI (`analysis-disabled` note)
 - [x] Model selector dropdown (Gemini 3.5 Flash / 3.1 Flash-Lite / 2.5 Pro), live-switchable
+- [x] In-app credential entry + macOS Keychain (Settings → Gemini API key)
+- [x] Show active model in the UI (chip in the toolbar)
+- [x] Improve question quality/relevance — topic-anchored prompt + few-shot
+      (RAG-for-Hermes style). Could still: surface the detected topic, send more context.
 - [ ] Tune trigger cadence (time vs. number of new segments)
-- [ ] In-app credential entry + macOS Keychain (so no env var)
-- [ ] Show active model in the UI
-- [ ] Improve question quality/relevance — make suggestions specific to the
-      topic being discussed, not generic. E.g. "let's design a RAG for Hermes"
-      should yield sharp RAG-design questions (chunking, retrieval eval,
-      embeddings, latency…). Ideas: richer prompt + few-shot examples, more
-      transcript context, surface the detected topic, maybe a tighter system role.
 
 ### Provider history
 - Started on Claude (Anthropic API key, then Google Vertex AI via `gcp_auth`),
@@ -49,11 +46,11 @@
 - [x] Audio capture to disk (16 kHz mono; PCM appended live, WAV on stop via `hound`)
 - [x] Library modal: list past meetings (title + date), open, delete
 - [x] Open a meeting = load it as current and resume recording into it
+- [x] Confirm-before-delete (native dialog)
+- [x] Configurable save location on disk (Settings → folder picker, persisted)
+- [x] Auto-generate a title (Gemini) on stop when still untitled
 - [ ] Audio playback for review (file is saved; no player UI yet)
 - [ ] Export a meeting (zip / share)
-- [ ] Confirm-before-delete
-- [ ] Configurable save location on disk (folder picker + persisted setting)
-- [x] Auto-generate a title (Gemini) on stop when still untitled
 
 ## Phase 2.6 — Language support
 - [ ] Language selector in the UI (or an "auto-detect" option)
@@ -68,7 +65,7 @@
 - [x] Tauri command to return device list to the UI
 - [x] Device picker dropdown in the UI
 - [x] Pass selected device into the capture pipeline
-- [ ] Persist last-used device across restarts
+- [x] Persist last-used device across restarts (settings.json)
 
 ## Audio capture quality (done)
 - [x] Silence-based chunking (cut at pauses, min/max bounds) — fixes words
@@ -89,13 +86,20 @@
 - [ ] Screen capture for digital meetings
 - [ ] Fold visual context into the suggestion prompt
 
-## Settings page
-- [ ] Consolidate model, input device, save location, and API key into a
-      dedicated settings panel (top bar is getting crowded)
+## Settings page (done)
+- [x] Consolidate model, input device, save location, and API key into a
+      dedicated settings panel; slim the top bar (Library / New / Settings)
+- [x] Self-host fonts (offline, via @fontsource) — no Google Fonts CDN
 
 ## Refinements / tech debt
 - [x] Fix words clipped at chunk boundaries (done via silence-based chunking)
 - [ ] Bundle the whisper model as a Tauri resource for distributable builds
 - [ ] Enable `whisper-rs` `metal` feature for GPU inference (speed)
 - [ ] Fall back to `tiny.en` if `base.en` can't keep up
-- [ ] Persist/export transcript + suggestions per meeting
+
+## Deliberately deferred (heavier / needs care)
+- Language support (Phase 2.6) — needs a multilingual model download + whisper
+  language wiring + testing; do as a focused task.
+- Audio playback UI — moderate; serve the saved WAV to an <audio> element.
+- Export a meeting (zip, incl. notes) — moderate.
+- Model bundling / metal / tiny.en fallback — packaging + build-tuning pass.
