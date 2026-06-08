@@ -136,33 +136,149 @@ body::after {
 }
 
 /* ---- Toolbar ---- */
-.toolbar {
+/* ---- Console rail: quick inline controls (instrument strip) ---- */
+.console {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
+  padding: 11px 14px;
+  background: linear-gradient(180deg, var(--bg-elev), var(--panel));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
   animation: rise 0.5s ease 0.05s both;
 }
 
-.toolbar-group {
+.console-actions {
   display: flex;
-  align-items: flex-end;
   gap: 8px;
+  flex: 0 0 auto;
 }
 
-.field {
+.console-modules {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* dividers between control modules, like a mixer's channel strips */
+.console-modules > .module + .module,
+.console-modules > .module + .icon-btn {
+  border-left: 1px solid var(--border-soft);
+  padding-left: 16px;
+}
+
+.module {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
 }
 
-.field-label {
+.module-label {
   font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.16em;
+  font-size: 9px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
-  padding-left: 2px;
+}
+
+.module-sub {
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+/* segmented audio-source toggle */
+.segmented {
+  display: inline-flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.seg {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.seg:last-child {
+  border-right: none;
+}
+
+.seg:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.seg.active {
+  background: var(--accent);
+  color: #1a1205;
+}
+
+/* compact selects in the rail */
+.mini-select {
+  appearance: none;
+  -webkit-appearance: none;
+  max-width: 150px;
+  background-color: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 26px 6px 10px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%236e727b' stroke-width='1.6'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color 0.16s ease;
+}
+
+.mini-select:hover {
+  border-color: #2e333c;
+}
+
+.mini-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.icon-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: var(--text-dim);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: color 0.16s ease, border-color 0.16s ease, transform 0.18s ease;
+}
+
+.icon-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  transform: rotate(35deg);
+}
+
+.settings-note {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
 }
 
 /* ---- Buttons ---- */
@@ -402,17 +518,6 @@ body::after {
   font-size: 14px;
   color: var(--text);
   animation: fade 0.45s ease both;
-}
-
-/* ---- Active-model chip ---- */
-.model-chip {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  color: var(--muted);
-  padding: 4px 9px;
-  border: 1px solid var(--border-soft);
-  border-radius: 999px;
 }
 
 /* ---- Settings form ---- */
