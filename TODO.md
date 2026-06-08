@@ -21,6 +21,11 @@
 - [ ] Tune trigger cadence (time vs. number of new segments)
 - [ ] In-app credential entry + macOS Keychain (so no env var)
 - [ ] Show active model in the UI
+- [ ] Improve question quality/relevance — make suggestions specific to the
+      topic being discussed, not generic. E.g. "let's design a RAG for Hermes"
+      should yield sharp RAG-design questions (chunking, retrieval eval,
+      embeddings, latency…). Ideas: richer prompt + few-shot examples, more
+      transcript context, surface the detected topic, maybe a tighter system role.
 
 ### Provider history
 - Started on Claude (Anthropic API key, then Google Vertex AI via `gcp_auth`),
