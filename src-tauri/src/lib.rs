@@ -4,7 +4,7 @@ mod transcribe;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -18,9 +18,8 @@ const TARGET_RATE: u32 = 16_000;
 const CHUNK_SECONDS: f32 = 5.0;
 
 // Claude analysis (Phase 2).
-// Default to the most capable model. For this high-frequency real-time loop,
-// "claude-haiku-4-5" is a cheaper, faster alternative — swap the string below.
-const ANALYSIS_MODEL: &str = "claude-opus-4-8";
+// Default model; the user can change it live from the UI dropdown.
+const DEFAULT_MODEL: &str = "claude-opus-4-8";
 // How often (at most) to ask Claude for fresh question suggestions.
 const ANALYSIS_INTERVAL_SECONDS: u64 = 20;
 // How much recent transcript (in characters) to send as context.
@@ -28,6 +27,7 @@ const MAX_CONTEXT_CHARS: usize = 4000;
 
 struct AppState {
     running: Arc<AtomicBool>,
+    model: Arc<Mutex<String>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -47,9 +47,10 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         return Ok(());
     }
     let running = state.running.clone();
+    let model = state.model.clone();
 
     std::thread::spawn(move || {
-        if let Err(e) = run_pipeline(&app, running.clone()) {
+        if let Err(e) = run_pipeline(&app, running.clone(), model) {
             let _ = app.emit("transcribe-error", e);
         }
         running.store(false, Ordering::SeqCst);
@@ -62,6 +63,13 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
 #[tauri::command]
 fn stop_listening(state: State<AppState>) {
     state.running.store(false, Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn set_model(model: String, state: State<AppState>) {
+    if let Ok(mut current) = state.model.lock() {
+        *current = model;
+    }
 }
 
 fn model_path() -> String {
@@ -79,7 +87,11 @@ fn recent_context(history: &[String], max_chars: usize) -> String {
     joined.chars().skip(char_count - max_chars).collect()
 }
 
-fn run_pipeline(app: &AppHandle, running: Arc<AtomicBool>) -> Result<(), String> {
+fn run_pipeline(
+    app: &AppHandle,
+    running: Arc<AtomicBool>,
+    model: Arc<Mutex<String>>,
+) -> Result<(), String> {
     // Load the model first so any error surfaces before we touch the mic.
     let transcriber = Transcriber::new(&model_path())?;
 
@@ -130,9 +142,13 @@ fn run_pipeline(app: &AppHandle, running: Arc<AtomicBool>) -> Result<(), String>
                             last_analysis = Instant::now();
                             let context = recent_context(&transcript_history, MAX_CONTEXT_CHARS);
                             let key = key.clone();
+                            let selected_model = model
+                                .lock()
+                                .map(|m| m.clone())
+                                .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
                             let app_for_analysis = app.clone();
                             std::thread::spawn(move || {
-                                match analyze::suggest_questions(&key, ANALYSIS_MODEL, &context) {
+                                match analyze::suggest_questions(&key, &selected_model, &context) {
                                     Ok(questions) if !questions.is_empty() => {
                                         let _ = app_for_analysis
                                             .emit("suggestions", SuggestionsPayload { questions });
@@ -166,10 +182,15 @@ pub fn run() {
         .setup(|app| {
             app.manage(AppState {
                 running: Arc::new(AtomicBool::new(false)),
+                model: Arc::new(Mutex::new(DEFAULT_MODEL.to_string())),
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_listening, stop_listening])
+        .invoke_handler(tauri::generate_handler![
+            start_listening,
+            stop_listening,
+            set_model
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

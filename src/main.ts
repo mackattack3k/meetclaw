@@ -8,6 +8,7 @@ const statusText = document.querySelector<HTMLParagraphElement>("#status-text")!
 const statusDot = document.querySelector<HTMLSpanElement>("#status-dot")!;
 const transcriptEl = document.querySelector<HTMLElement>("#transcript")!;
 const suggestionsEl = document.querySelector<HTMLElement>("#suggestions")!;
+const modelSelect = document.querySelector<HTMLSelectElement>("#model-select")!;
 
 function setListening(on: boolean) {
   listening = on;
@@ -61,6 +62,18 @@ toggleBtn.addEventListener("click", async () => {
     setListening(false);
   }
 });
+
+// Keep the backend's selected model in sync with the dropdown.
+async function applyModel() {
+  try {
+    await invoke("set_model", { model: modelSelect.value });
+  } catch (err) {
+    statusText.textContent = `Error setting model: ${err}`;
+  }
+}
+
+modelSelect.addEventListener("change", applyModel);
+applyModel(); // push the default on load
 
 // Backend events
 listen<{ text: string }>("transcript", (event) => {
