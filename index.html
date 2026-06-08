@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MeetClaw</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="dot" id="status-dot"></span>
+          <h1>MeetClaw</h1>
+        </div>
+        <button id="toggle-btn" class="btn">Start listening</button>
+      </header>
+
+      <p id="status-text" class="status">Idle. Press start to begin transcribing.</p>
+
+      <section class="transcript" id="transcript" aria-live="polite">
+        <p class="placeholder">Transcript will appear here…</p>
+      </section>
+    </main>
+  </body>
+</html>
