@@ -28,13 +28,12 @@
 - Claude.ai Pro/Max OAuth was ruled out — restricted to Claude Code, rejected by
   the Messages API (Anthropic policy, Feb 2026).
 
-## Phase 2.5 — Personal notes (and as LLM context)
-- [ ] Editable notes pane in the UI (write your own notes during the meeting)
-- [ ] Keep notes in app state; persist for the session
-- [ ] Feed the user's notes into the Gemini context alongside the transcript,
-      so suggestions account for what the user already knows / cares about
-- [ ] Tune the prompt to use notes (e.g. "build on the user's notes; don't
-      re-suggest things they've already written down")
+## Phase 2.5 — Personal notes (and as LLM context) (done)
+- [x] Editable notes pane in the UI (write your own notes during the meeting)
+- [x] Keep notes in app state (in-memory for the session) via `set_notes`
+- [x] Feed the user's notes into the Gemini context alongside the transcript
+- [x] Tune the prompt to use notes (build on them; don't re-suggest noted items)
+- [ ] Persist notes to disk across restarts
 - [ ] Include notes in any transcript/suggestions export
 
 ## Phase 2.6 — Language support
