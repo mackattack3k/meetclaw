@@ -48,11 +48,15 @@ fn now_ms() -> u128 {
 }
 
 pub fn meetings_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("no app data dir: {e}"))?
-        .join("meetings");
+    // Use the user-configured save location if set, else the default app data dir.
+    let dir = match crate::settings::save_dir(app) {
+        Some(custom) => custom,
+        None => app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("no app data dir: {e}"))?
+            .join("meetings"),
+    };
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create meetings dir: {e}"))?;
     Ok(dir)
 }

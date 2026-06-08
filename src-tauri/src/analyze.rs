@@ -20,8 +20,11 @@ and do not re-suggest questions about things they have already written down. \
 Prefer questions that surface assumptions, clarify scope, or move the conversation forward. \
 Do not suggest generic questions. If nothing useful comes to mind, return an empty list.";
 
-/// Read the Gemini API key from the environment, if present.
+/// Read the Gemini API key: keychain first (set via Settings), then env / .env.
 pub fn api_key() -> Option<String> {
+    if let Some(key) = crate::settings::get_api_key() {
+        return Some(key);
+    }
     for var in ["GEMINI_API_KEY", "GOOGLE_API_KEY"] {
         if let Ok(key) = std::env::var(var) {
             if !key.trim().is_empty() {

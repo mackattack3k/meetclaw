@@ -3,6 +3,7 @@ import "@fontsource-variable/hanken-grotesk";
 import "@fontsource-variable/jetbrains-mono";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 
 let listening = false;
 
@@ -20,6 +21,24 @@ const newBtn = document.querySelector<HTMLButtonElement>("#new-btn")!;
 const libraryEl = document.querySelector<HTMLElement>("#library")!;
 const libraryListEl = document.querySelector<HTMLElement>("#library-list")!;
 const libraryCloseEl = document.querySelector<HTMLButtonElement>("#library-close")!;
+const settingsBtn = document.querySelector<HTMLButtonElement>("#settings-btn")!;
+const settingsEl = document.querySelector<HTMLElement>("#settings")!;
+const settingsCloseEl = document.querySelector<HTMLButtonElement>("#settings-close")!;
+const activeModelEl = document.querySelector<HTMLSpanElement>("#active-model")!;
+const saveDirEl = document.querySelector<HTMLSpanElement>("#save-dir")!;
+const chooseDirBtn = document.querySelector<HTMLButtonElement>("#choose-dir")!;
+const resetDirBtn = document.querySelector<HTMLButtonElement>("#reset-dir")!;
+const apiKeyEl = document.querySelector<HTMLInputElement>("#api-key")!;
+const saveKeyBtn = document.querySelector<HTMLButtonElement>("#save-key")!;
+const keyStatusEl = document.querySelector<HTMLSpanElement>("#key-status")!;
+
+type SettingsView = {
+  model: string;
+  device: string | null;
+  save_dir: string | null;
+  default_save_dir: string;
+  has_api_key: boolean;
+};
 
 type MeetingMeta = {
   id: string;
@@ -90,23 +109,30 @@ toggleBtn.addEventListener("click", async () => {
   }
 });
 
-// Keep the backend's selected model in sync with the dropdown.
-async function applyModel() {
-  try {
-    await invoke("set_model", { model: modelSelect.value });
-  } catch (err) {
-    statusText.textContent = `Error setting model: ${err}`;
-  }
+// --- Settings (model, device, save location, API key) ---
+
+function updateModelChip() {
+  const opt = modelSelect.options[modelSelect.selectedIndex];
+  activeModelEl.textContent = opt ? opt.text : modelSelect.value;
 }
 
-modelSelect.addEventListener("change", applyModel);
-applyModel(); // push the default on load
+modelSelect.addEventListener("change", () => {
+  invoke("set_model", { model: modelSelect.value }).catch((err) => {
+    statusText.textContent = `Error setting model: ${err}`;
+  });
+  updateModelChip();
+});
 
-// Populate the input-device dropdown and sync the choice to the backend.
+deviceSelect.addEventListener("change", () => {
+  invoke("set_device", { device: deviceSelect.value }).catch((err) => {
+    statusText.textContent = `Error setting device: ${err}`;
+  });
+});
+
+// Populate the input-device dropdown (options only; selection synced later).
 async function loadDevices() {
   try {
     const devices = await invoke<string[]>("list_devices");
-    // Keep the "Default mic" option, append the enumerated devices.
     for (const name of devices) {
       const opt = document.createElement("option");
       opt.value = name;
@@ -118,13 +144,77 @@ async function loadDevices() {
   }
 }
 
-deviceSelect.addEventListener("change", () => {
-  invoke("set_device", { device: deviceSelect.value }).catch((err) => {
-    statusText.textContent = `Error setting device: ${err}`;
-  });
+function showSaveDir(s: SettingsView) {
+  saveDirEl.textContent = s.save_dir ?? `${s.default_save_dir}  (default)`;
+}
+
+function showKeyStatus(has: boolean) {
+  keyStatusEl.textContent = has ? "A key is saved." : "No key saved.";
+  apiKeyEl.placeholder = has ? "•••••••• (saved)" : "Paste key…";
+}
+
+async function refreshSettings() {
+  try {
+    const s = await invoke<SettingsView>("get_settings");
+    modelSelect.value = s.model;
+    deviceSelect.value = s.device ?? "";
+    showSaveDir(s);
+    showKeyStatus(s.has_api_key);
+    updateModelChip();
+  } catch (err) {
+    statusText.textContent = `Error loading settings: ${err}`;
+  }
+}
+
+function hideSettings() {
+  settingsEl.classList.add("hidden");
+}
+settingsBtn.addEventListener("click", () => {
+  refreshSettings();
+  settingsEl.classList.remove("hidden");
+});
+settingsCloseEl.addEventListener("click", hideSettings);
+settingsEl.addEventListener("click", (e) => {
+  if (e.target === settingsEl) hideSettings();
 });
 
-loadDevices();
+chooseDirBtn.addEventListener("click", async () => {
+  try {
+    const picked = await open({ directory: true, multiple: false });
+    if (typeof picked === "string") {
+      await invoke("set_save_dir", { path: picked });
+      await refreshSettings();
+    }
+  } catch (err) {
+    statusText.textContent = `Error choosing folder: ${err}`;
+  }
+});
+
+resetDirBtn.addEventListener("click", async () => {
+  try {
+    await invoke("set_save_dir", { path: null });
+    await refreshSettings();
+  } catch (err) {
+    statusText.textContent = `Error resetting folder: ${err}`;
+  }
+});
+
+saveKeyBtn.addEventListener("click", async () => {
+  try {
+    await invoke("set_api_key", { key: apiKeyEl.value });
+    apiKeyEl.value = "";
+    await refreshSettings();
+    keyStatusEl.textContent = "Saved.";
+  } catch (err) {
+    statusText.textContent = `Error saving key: ${err}`;
+  }
+});
+
+// Initial load: populate devices, then sync saved settings into the controls.
+(async () => {
+  await loadDevices();
+  await refreshSettings();
+})();
 
 // Sync the user's notes to the backend, debounced so we don't spam on each keystroke.
 let notesTimer: number | undefined;

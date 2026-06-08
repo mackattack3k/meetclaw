@@ -1,6 +1,7 @@
 mod analyze;
 mod audio;
 mod meeting;
+mod settings;
 mod transcribe;
 
 use std::path::PathBuf;
@@ -152,10 +153,11 @@ fn stop_listening(state: State<AppState>) {
 }
 
 #[tauri::command]
-fn set_model(model: String, state: State<AppState>) {
+fn set_model(app: AppHandle, model: String, state: State<AppState>) {
     if let Ok(mut current) = state.model.lock() {
-        *current = model;
+        *current = model.clone();
     }
+    let _ = settings::update(&app, |s| s.model = Some(model));
 }
 
 #[tauri::command]
@@ -164,11 +166,56 @@ fn list_devices() -> Vec<String> {
 }
 
 #[tauri::command]
-fn set_device(device: Option<String>, state: State<AppState>) {
+fn set_device(app: AppHandle, device: Option<String>, state: State<AppState>) {
+    // Treat an empty selection as "use the default device".
+    let device = device.filter(|d| !d.is_empty());
     if let Ok(mut current) = state.device.lock() {
-        // Treat an empty selection as "use the default device".
-        *current = device.filter(|d| !d.is_empty());
+        *current = device.clone();
     }
+    let _ = settings::update(&app, |s| s.device = device);
+}
+
+#[derive(serde::Serialize)]
+struct SettingsView {
+    model: String,
+    device: Option<String>,
+    save_dir: Option<String>,
+    default_save_dir: String,
+    has_api_key: bool,
+}
+
+#[tauri::command]
+fn get_settings(app: AppHandle, state: State<AppState>) -> SettingsView {
+    let s = settings::load(&app);
+    let model = state
+        .model
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    let device = state.device.lock().ok().and_then(|d| d.clone());
+    let default_save_dir = app
+        .path()
+        .app_data_dir()
+        .map(|p| p.join("meetings").to_string_lossy().to_string())
+        .unwrap_or_default();
+    SettingsView {
+        model,
+        device,
+        save_dir: s.save_dir,
+        default_save_dir,
+        has_api_key: settings::has_api_key(),
+    }
+}
+
+#[tauri::command]
+fn set_save_dir(app: AppHandle, path: Option<String>) -> Result<(), String> {
+    let path = path.filter(|p| !p.trim().is_empty());
+    settings::update(&app, |s| s.save_dir = path)
+}
+
+#[tauri::command]
+fn set_api_key(key: String) -> Result<(), String> {
+    settings::set_api_key(&key)
 }
 
 #[tauri::command]
@@ -291,8 +338,7 @@ fn run_pipeline(
     if api_key.is_none() {
         let _ = app.emit(
             "analysis-disabled",
-            "No GEMINI_API_KEY set — question suggestions are off. Get a key at \
-             https://ai.google.dev/gemini-api/docs/api-key",
+            "No Gemini API key — question suggestions are off. Add one in Settings.",
         );
     }
     let mut transcript_history: Vec<String> = Vec::new();
@@ -404,13 +450,17 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let saved = settings::load(app.handle());
             app.manage(AppState {
                 running: Arc::new(AtomicBool::new(false)),
-                model: Arc::new(Mutex::new(DEFAULT_MODEL.to_string())),
+                model: Arc::new(Mutex::new(
+                    saved.model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+                )),
                 notes: Arc::new(Mutex::new(String::new())),
                 meeting: Arc::new(Mutex::new(None)),
-                device: Arc::new(Mutex::new(None)),
+                device: Arc::new(Mutex::new(saved.device)),
             });
             Ok(())
         })
@@ -425,7 +475,10 @@ pub fn run() {
             load_meeting,
             delete_meeting,
             list_devices,
-            set_device
+            set_device,
+            get_settings,
+            set_save_dir,
+            set_api_key
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
