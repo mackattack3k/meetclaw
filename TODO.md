@@ -92,11 +92,19 @@
       easy Rust path; (c) prompt the LLM to guess speaker turns from transcript
       content (rough). Show speaker tags in the transcript; feed them to Gemini.
 
-## Phase 4 — System audio (digital meetings)
-- [ ] Capture other participants' audio (Zoom/Meet/Teams)
-- [ ] Option A: ScreenCaptureKit (macOS 13+) — Swift/ObjC bridge from Rust
-- [ ] Option B: virtual audio device (BlackHole/Loopback) — user installs, read as input
-- [ ] Mix/label mic vs system audio in the transcript
+## Phase 4 — System audio (digital meetings) (partial)
+- [x] Capture other participants' audio via ScreenCaptureKit — Swift helper
+      (`src-tauri/syscap/main.swift`) streams 48 kHz mono PCM to a Rust sidecar
+      reader (`src-tauri/src/syscap.rs`)
+- [x] "Audio source" setting: Microphone vs System audio
+- [x] Surface the Screen Recording permission error to the UI (`syscap-status`)
+- [ ] Mix mic + system audio (capture BOTH you and them at once) — needs
+      summing two async streams with drift handling; currently it's one or the
+      other
+- [ ] Bundle the Swift helper as a Tauri sidecar for distributable builds
+      (today it's spawned from `src-tauri/binaries/`, built via
+      `src-tauri/syscap/build.sh`)
+- [ ] Auto-trigger / guide the Screen Recording permission prompt on first use
 
 ## Phase 5 — Vision (whiteboard / screen)
 - [ ] Camera capture at ~1 Hz

@@ -27,6 +27,7 @@ const settingsCloseEl = document.querySelector<HTMLButtonElement>("#settings-clo
 const activeModelEl = document.querySelector<HTMLSpanElement>("#active-model")!;
 const activeLangEl = document.querySelector<HTMLSpanElement>("#active-lang")!;
 const langSelect = document.querySelector<HTMLSelectElement>("#lang-select")!;
+const sourceSelect = document.querySelector<HTMLSelectElement>("#source-select")!;
 const saveDirEl = document.querySelector<HTMLSpanElement>("#save-dir")!;
 const chooseDirBtn = document.querySelector<HTMLButtonElement>("#choose-dir")!;
 const resetDirBtn = document.querySelector<HTMLButtonElement>("#reset-dir")!;
@@ -41,6 +42,7 @@ type SettingsView = {
   default_save_dir: string;
   has_api_key: boolean;
   language: string;
+  audio_source: string;
 };
 
 type MeetingMeta = {
@@ -153,6 +155,12 @@ langSelect.addEventListener("change", () => {
   updateLangChip();
 });
 
+sourceSelect.addEventListener("change", () => {
+  invoke("set_audio_source", { source: sourceSelect.value }).catch((err) => {
+    statusText.textContent = `Error setting audio source: ${err}`;
+  });
+});
+
 // Populate the input-device dropdown (options only; selection synced later).
 async function loadDevices() {
   try {
@@ -183,6 +191,7 @@ async function refreshSettings() {
     modelSelect.value = s.model;
     deviceSelect.value = s.device ?? "";
     langSelect.value = s.language;
+    sourceSelect.value = s.audio_source;
     showSaveDir(s);
     showKeyStatus(s.has_api_key);
     updateModelChip();
@@ -422,6 +431,11 @@ listen<string>("analysis-error", (event) => {
 // Detected transcription language (meaningful when language = auto).
 listen<string>("language-detected", (event) => {
   if (langSelect.value === "auto") updateLangChip(event.payload);
+});
+
+// System-audio helper status (permission errors, ready).
+listen<string>("syscap-status", (event) => {
+  statusText.textContent = event.payload;
 });
 
 // Auto-generated meeting title (on stop, if still untitled). Don't clobber a

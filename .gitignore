@@ -30,3 +30,6 @@ src-tauri/models/*.bin
 *.njsproj
 *.sln
 *.sw?
+
+# Compiled Swift system-audio helper (build with src-tauri/syscap/build.sh)
+src-tauri/binaries/

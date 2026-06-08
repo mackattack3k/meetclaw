@@ -69,6 +69,26 @@ If the key isn't set, transcription still works and the suggestions panel shows
 a "disabled" note. The model is chosen from the dropdown in the app
 (Gemini 3.5 Flash / 3.1 Flash-Lite / 2.5 Pro), live-switchable.
 
+## System audio (digital meetings)
+
+To transcribe the *other participants* in a Zoom/Meet/Teams call (not just your
+mic), set **Audio source → System audio** in Settings. This uses a small
+ScreenCaptureKit helper (`src-tauri/syscap/main.swift`) that streams system
+audio to the app.
+
+Build the helper once (needs Xcode command-line tools):
+
+```
+src-tauri/syscap/build.sh
+```
+
+It requires the **Screen Recording** permission (System Settings › Privacy &
+Security › Screen Recording) — grant it to MeetClaw and restart. Until then the
+app shows a permission note when you start with System audio selected.
+
+> Note: system audio captures the remote participants only (what's played out),
+> not your own mic. Mixing both into one recording is a planned improvement.
+
 ## Meeting library
 
 Every meeting is saved continuously to a folder under the app data dir

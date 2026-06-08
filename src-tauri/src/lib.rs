@@ -2,6 +2,7 @@ mod analyze;
 mod audio;
 mod meeting;
 mod settings;
+mod syscap;
 mod transcribe;
 
 use std::path::PathBuf;
@@ -30,6 +31,20 @@ const SILENCE_RMS_THRESHOLD: f32 = 0.01; // below this RMS counts as silence
 const DEFAULT_MODEL: &str = "gemini-3.5-flash";
 // Transcription language: "auto" (detect) or a 2-letter code like "en".
 const DEFAULT_LANGUAGE: &str = "auto";
+// Audio source: "mic" or "system" (ScreenCaptureKit, for digital meetings).
+const DEFAULT_AUDIO_SOURCE: &str = "mic";
+
+/// Keeps the active capture alive for the duration of a recording (RAII guard;
+/// the fields are only held so the cpal stream / helper process stay alive).
+#[allow(dead_code)]
+enum Capture {
+    Mic(audio::AudioCapture),
+    System(syscap::SystemAudioCapture),
+}
+
+fn syscap_path() -> String {
+    format!("{}/binaries/meetclaw-syscap", env!("CARGO_MANIFEST_DIR"))
+}
 // How often (at most) to ask Claude for fresh question suggestions.
 const ANALYSIS_INTERVAL_SECONDS: u64 = 20;
 // How much recent transcript (in characters) to send as context.
@@ -44,6 +59,8 @@ struct AppState {
     device: Arc<Mutex<Option<String>>>,
     // Transcription language ("auto" or a 2-letter code).
     language: Arc<Mutex<String>>,
+    // Audio source ("mic" or "system").
+    audio_source: Arc<Mutex<String>>,
 }
 
 /// The meeting currently being recorded into / edited.
@@ -97,11 +114,23 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
     let dir = current.dir;
     let device = state.device.lock().ok().and_then(|d| d.clone());
     let language = state.language.clone();
+    let source = state
+        .audio_source
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_else(|_| DEFAULT_AUDIO_SOURCE.to_string());
 
     std::thread::spawn(move || {
-        if let Err(e) =
-            run_pipeline(&app, running.clone(), model, notes, dir.clone(), device, language)
-        {
+        if let Err(e) = run_pipeline(
+            &app,
+            running.clone(),
+            model,
+            notes,
+            dir.clone(),
+            device,
+            language,
+            source,
+        ) {
             let _ = app.emit("transcribe-error", e);
         }
         running.store(false, Ordering::SeqCst);
@@ -191,6 +220,14 @@ fn set_language(app: AppHandle, language: String, state: State<AppState>) {
     let _ = settings::update(&app, |s| s.language = Some(language));
 }
 
+#[tauri::command]
+fn set_audio_source(app: AppHandle, source: String, state: State<AppState>) {
+    if let Ok(mut current) = state.audio_source.lock() {
+        *current = source.clone();
+    }
+    let _ = settings::update(&app, |s| s.audio_source = Some(source));
+}
+
 #[derive(serde::Serialize)]
 struct SettingsView {
     model: String,
@@ -199,6 +236,7 @@ struct SettingsView {
     default_save_dir: String,
     has_api_key: bool,
     language: String,
+    audio_source: String,
 }
 
 #[tauri::command]
@@ -215,6 +253,11 @@ fn get_settings(app: AppHandle, state: State<AppState>) -> SettingsView {
         .lock()
         .map(|l| l.clone())
         .unwrap_or_else(|_| DEFAULT_LANGUAGE.to_string());
+    let audio_source = state
+        .audio_source
+        .lock()
+        .map(|a| a.clone())
+        .unwrap_or_else(|_| DEFAULT_AUDIO_SOURCE.to_string());
     let default_save_dir = app
         .path()
         .app_data_dir()
@@ -227,6 +270,7 @@ fn get_settings(app: AppHandle, state: State<AppState>) -> SettingsView {
         default_save_dir,
         has_api_key: settings::has_api_key(),
         language,
+        audio_source,
     }
 }
 
@@ -343,13 +387,21 @@ fn run_pipeline(
     dir: PathBuf,
     device: Option<String>,
     language: Arc<Mutex<String>>,
+    source: String,
 ) -> Result<(), String> {
     // Load the model first so any error surfaces before we touch the mic.
     let transcriber = Transcriber::new(&model_path())?;
 
     let (tx, rx) = mpsc::channel::<Vec<f32>>();
-    let capture = AudioCapture::start(tx, device.as_deref())?;
-    let native_rate = capture.sample_rate;
+    // `capture` is held for the duration so the stream/helper stays alive.
+    let (capture, native_rate) = if source == "system" {
+        let cap = syscap::SystemAudioCapture::start(tx, &syscap_path(), app.clone())?;
+        (Capture::System(cap), syscap::SAMPLE_RATE)
+    } else {
+        let cap = AudioCapture::start(tx, device.as_deref())?;
+        let rate = cap.sample_rate;
+        (Capture::Mic(cap), rate)
+    };
 
     let min_samples = (native_rate as f32 * MIN_CHUNK_SECONDS) as usize;
     let max_samples = (native_rate as f32 * MAX_CHUNK_SECONDS) as usize;
@@ -502,6 +554,11 @@ pub fn run() {
                 language: Arc::new(Mutex::new(
                     saved.language.unwrap_or_else(|| DEFAULT_LANGUAGE.to_string()),
                 )),
+                audio_source: Arc::new(Mutex::new(
+                    saved
+                        .audio_source
+                        .unwrap_or_else(|| DEFAULT_AUDIO_SOURCE.to_string()),
+                )),
             });
 
             // Native macOS menu: Settings… bound to Cmd+, under the app menu,
@@ -565,7 +622,8 @@ pub fn run() {
             get_settings,
             set_save_dir,
             set_api_key,
-            set_language
+            set_language,
+            set_audio_source
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

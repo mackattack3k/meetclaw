@@ -16,6 +16,7 @@ pub struct Settings {
     pub device: Option<String>,
     pub save_dir: Option<String>,
     pub language: Option<String>,
+    pub audio_source: Option<String>,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
