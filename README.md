@@ -1,11 +1,8 @@
 # MeetClaw
 
 A desktop meeting assistant. It listens to your microphone, transcribes the
-meeting in real time with a local Whisper model, and (later) acts like a quiet
-third participant that suggests questions you might want to ask.
-
-This is currently a **walking skeleton**: mic capture → local transcription →
-live transcript on screen. No AI analysis yet.
+meeting in real time with a local Whisper model, and acts like a quiet third
+participant that suggests questions you might want to ask (via the Gemini API).
 
 ## How it works
 
@@ -55,41 +52,26 @@ macOS will ask for microphone permission the first time you press
 
 ## AI question suggestions (Phase 2)
 
-While listening, MeetClaw sends the rolling transcript to the Claude API every
+While listening, MeetClaw sends the rolling transcript to the Gemini API every
 ~20 seconds and shows up to 3 questions a sharp third participant might ask, in
 the right-hand panel. See `src-tauri/src/analyze.rs`.
 
-It works with two providers, auto-selected from the environment. If neither is
-set, transcription still works and the suggestions panel shows a "disabled" note.
-
-**Option A — Anthropic API key (direct):**
+Auth is a plain API key. Get one from
+[Google AI Studio](https://ai.google.dev/gemini-api/docs/api-key), then:
 
 ```
-export ANTHROPIC_API_KEY=sk-ant-...
+export GEMINI_API_KEY=...
 npm run tauri dev
 ```
 
-**Option B — Google Vertex AI** (uses a GCP service account / ADC, not an API
-key). There is no "Vertex API key" for Claude — auth is a Google Cloud OAuth
-token minted from a service account or Application Default Credentials:
-
-```
-export VERTEX_PROJECT_ID=my-gcp-project
-export VERTEX_REGION=global            # or us-east5, europe-west1, "us"/"eu", etc.
-# Credentials, pick one:
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-#   ...or run: gcloud auth application-default login
-npm run tauri dev
-```
-
-`ANTHROPIC_API_KEY` takes priority if both are set. The model is chosen from the
-dropdown in the app (Opus 4.8 / Sonnet 4.6 / Haiku 4.5); on Vertex the model id
-is mapped automatically.
+If the key isn't set, transcription still works and the suggestions panel shows
+a "disabled" note. The model is chosen from the dropdown in the app
+(Gemini 3.5 Flash / 3.1 Flash-Lite / 2.5 Pro), live-switchable.
 
 ## Roadmap
 
 1. **(done)** Skeleton: mic → local transcript.
-2. **(done)** AI layer: rolling transcript → Claude → suggested questions.
+2. **(done)** AI layer: rolling transcript → Gemini → suggested questions.
 3. Microphone / input device selection in the UI.
 4. System audio capture for digital meetings (Zoom/Meet/Teams) via
    ScreenCaptureKit or a virtual audio device (BlackHole/Loopback).

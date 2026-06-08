@@ -17,9 +17,9 @@ const TARGET_RATE: u32 = 16_000;
 // How many seconds of audio to buffer before running a transcription pass.
 const CHUNK_SECONDS: f32 = 5.0;
 
-// Claude analysis (Phase 2).
+// Gemini analysis (Phase 2).
 // Default model; the user can change it live from the UI dropdown.
-const DEFAULT_MODEL: &str = "claude-opus-4-8";
+const DEFAULT_MODEL: &str = "gemini-3.5-flash";
 // How often (at most) to ask Claude for fresh question suggestions.
 const ANALYSIS_INTERVAL_SECONDS: u64 = 20;
 // How much recent transcript (in characters) to send as context.
@@ -102,13 +102,13 @@ fn run_pipeline(
     let chunk_native_len = (native_rate as f32 * CHUNK_SECONDS) as usize;
     let mut buffer: Vec<f32> = Vec::with_capacity(chunk_native_len);
 
-    // Phase 2: rolling transcript + periodic Claude analysis.
-    let provider = analyze::detect_provider();
-    if provider.is_none() {
+    // Phase 2: rolling transcript + periodic Gemini analysis.
+    let api_key = analyze::api_key();
+    if api_key.is_none() {
         let _ = app.emit(
             "analysis-disabled",
-            "No Claude credentials found. Set ANTHROPIC_API_KEY, or VERTEX_PROJECT_ID \
-             (+ GOOGLE_APPLICATION_CREDENTIALS / ADC) for Vertex — question suggestions are off.",
+            "No GEMINI_API_KEY set — question suggestions are off. Get a key at \
+             https://ai.google.dev/gemini-api/docs/api-key",
         );
     }
     let mut transcript_history: Vec<String> = Vec::new();
@@ -134,22 +134,22 @@ fn run_pipeline(
                     transcript_history.push(text.clone());
                     let _ = app.emit("transcript", TranscriptPayload { text });
 
-                    // Periodically ask Claude for question suggestions. Run the
+                    // Periodically ask Gemini for question suggestions. Run the
                     // call on its own thread so transcription keeps flowing.
-                    if let Some(prov) = &provider {
+                    if let Some(key) = &api_key {
                         if last_analysis.elapsed()
                             >= Duration::from_secs(ANALYSIS_INTERVAL_SECONDS)
                         {
                             last_analysis = Instant::now();
                             let context = recent_context(&transcript_history, MAX_CONTEXT_CHARS);
-                            let prov = prov.clone();
+                            let key = key.clone();
                             let selected_model = model
                                 .lock()
                                 .map(|m| m.clone())
                                 .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
                             let app_for_analysis = app.clone();
                             std::thread::spawn(move || {
-                                match analyze::suggest_questions(&prov, &selected_model, &context) {
+                                match analyze::suggest_questions(&key, &selected_model, &context) {
                                     Ok(questions) if !questions.is_empty() => {
                                         let _ = app_for_analysis
                                             .emit("suggestions", SuggestionsPayload { questions });

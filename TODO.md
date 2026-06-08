@@ -10,22 +10,23 @@
 - [x] macOS mic permission (`Info.plist`)
 
 ## Phase 2 — AI question suggestions (done)
-- [x] Anthropic API client in Rust (`reqwest`), key from `ANTHROPIC_API_KEY`
+- [x] Gemini API client in Rust (`reqwest`), key from `GEMINI_API_KEY`
 - [x] Rolling transcript buffer; trigger analysis every ~20s
 - [x] Prompt: "act as a quiet third participant, suggest questions to ask"
-- [x] Structured output (`output_config.format`) for guaranteed-parseable JSON
+- [x] Structured output (`responseSchema`) for parseable JSON
 - [x] Emit `suggestions` events to the UI
 - [x] UI panel for suggested questions (separate from transcript)
 - [x] Handle missing API key gracefully in the UI (`analysis-disabled` note)
-- [x] Model selector dropdown (Opus 4.8 / Sonnet 4.6 / Haiku 4.5), live-switchable
-- [x] Provider auth: Anthropic API key, or Google Vertex AI (service account / ADC via `gcp_auth`)
+- [x] Model selector dropdown (Gemini 3.5 Flash / 3.1 Flash-Lite / 2.5 Pro), live-switchable
 - [ ] Tune trigger cadence (time vs. number of new segments)
-- [ ] In-app credential entry + macOS Keychain (so no env vars)
-- [ ] Show active provider/model in the UI
+- [ ] In-app credential entry + macOS Keychain (so no env var)
+- [ ] Show active model in the UI
 
-### Auth notes
-- Claude.ai Pro/Max OAuth is NOT usable — restricted to Claude Code, rejected by
-  the Messages API (Anthropic policy, Feb 2026). API key or Vertex/Bedrock only.
+### Provider history
+- Started on Claude (Anthropic API key, then Google Vertex AI via `gcp_auth`),
+  then switched to the Gemini Developer API key (simplest auth, native to GCP).
+- Claude.ai Pro/Max OAuth was ruled out — restricted to Claude Code, rejected by
+  the Messages API (Anthropic policy, Feb 2026).
 
 ## Phase 3 — Microphone & device selection
 - [ ] List available input devices (`cpal` enumerate)
