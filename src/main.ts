@@ -3,7 +3,7 @@ import "@fontsource-variable/hanken-grotesk";
 import "@fontsource-variable/jetbrains-mono";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
 
 let listening = false;
 
@@ -310,6 +310,11 @@ function renderLibrary(meetings: MeetingMeta[]) {
     del.className = "btn btn-secondary library-delete";
     del.textContent = "Delete";
     del.addEventListener("click", async () => {
+      const ok = await confirm(`Delete "${m.title}"? This can't be undone.`, {
+        title: "Delete meeting",
+        kind: "warning",
+      });
+      if (!ok) return;
       try {
         await invoke("delete_meeting", { id: m.id });
         const meetings = await invoke<MeetingMeta[]>("list_meetings");
