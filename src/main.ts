@@ -35,10 +35,11 @@ type MeetingDetail = {
 
 function setListening(on: boolean) {
   listening = on;
-  toggleBtn.textContent = on ? "Stop listening" : "Start listening";
+  toggleBtn.textContent = on ? "Stop" : "Start";
+  toggleBtn.classList.toggle("recording", on);
   statusDot.classList.toggle("live", on);
   statusText.textContent = on
-    ? "Listening… transcribing every few seconds."
+    ? "Listening — transcribing on pauses."
     : "Stopped.";
 }
 

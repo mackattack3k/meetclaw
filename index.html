@@ -2,6 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MeetClaw</title>
@@ -13,7 +19,7 @@
       <header class="topbar">
         <div class="brand">
           <span class="dot" id="status-dot"></span>
-          <h1>MeetClaw</h1>
+          <h1>Meet<span class="brand-accent">Claw</span></h1>
         </div>
         <input
           id="title-input"
@@ -21,33 +27,48 @@
           placeholder="Untitled meeting"
           title="Meeting title"
         />
-        <div class="controls">
-          <button id="library-btn" class="btn btn-secondary">Library</button>
-          <button id="new-btn" class="btn btn-secondary">New</button>
-          <select id="device-select" class="select" title="Input device">
-            <option value="">Default mic</option>
-          </select>
-          <select id="model-select" class="select" title="Analysis model">
-            <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
-            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option>
-            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-          </select>
-          <button id="toggle-btn" class="btn">Start listening</button>
-        </div>
+        <button id="toggle-btn" class="btn btn-primary">Start</button>
       </header>
 
-      <p id="status-text" class="status">Idle. Press start to begin transcribing.</p>
+      <div class="toolbar">
+        <div class="toolbar-group">
+          <button id="library-btn" class="btn btn-ghost">Library</button>
+          <button id="new-btn" class="btn btn-ghost">New</button>
+        </div>
+        <div class="toolbar-group">
+          <label class="field">
+            <span class="field-label">Mic</span>
+            <select id="device-select" class="select" title="Input device">
+              <option value="">Default mic</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Model</span>
+            <select id="model-select" class="select" title="Analysis model">
+              <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+              <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option>
+              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <p id="status-text" class="status">Idle — press start to begin transcribing.</p>
 
       <div class="content">
         <section class="panel">
-          <h2 class="panel-title">Transcript</h2>
+          <div class="panel-head">
+            <span class="panel-title">Transcript</span>
+          </div>
           <div class="scroll" id="transcript" aria-live="polite">
             <p class="placeholder">Transcript will appear here…</p>
           </div>
         </section>
 
         <section class="panel">
-          <h2 class="panel-title">My notes</h2>
+          <div class="panel-head">
+            <span class="panel-title">My notes</span>
+          </div>
           <textarea
             id="notes"
             class="notes"
@@ -55,8 +76,10 @@
           ></textarea>
         </section>
 
-        <section class="panel">
-          <h2 class="panel-title">Suggested questions</h2>
+        <section class="panel panel-accent">
+          <div class="panel-head">
+            <span class="panel-title">Suggested questions</span>
+          </div>
           <div class="scroll" id="suggestions" aria-live="polite">
             <p class="placeholder">Questions will appear here…</p>
           </div>
@@ -68,7 +91,7 @@
       <div class="library-panel">
         <div class="library-header">
           <h2>Meetings</h2>
-          <button id="library-close" class="btn btn-secondary">Close</button>
+          <button id="library-close" class="btn btn-ghost">Close</button>
         </div>
         <div id="library-list" class="library-list"></div>
       </div>
