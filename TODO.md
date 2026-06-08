@@ -52,13 +52,12 @@
 - [ ] Audio playback for review (file is saved; no player UI yet)
 - [ ] Export a meeting (zip / share)
 
-## Phase 2.6 — Language support
-- [ ] Language selector in the UI (or an "auto-detect" option)
-- [ ] Show which language is being parsed/detected in the UI
-- [ ] Switch to a multilingual whisper model (`ggml-base`) — the current
-      `ggml-base.en` is English-only and can't do other languages
-- [ ] Pass the chosen language to whisper (`set_language`), or `None` to
-      auto-detect, and read the detected language back from the whisper state
+## Phase 2.6 — Language support (done)
+- [x] Language selector in Settings (auto-detect + ~20 languages)
+- [x] Show the detected/active language as a chip in the toolbar
+- [x] Switched to the multilingual `ggml-base` model
+- [x] Pass the chosen language to whisper (or "auto"), read the detected
+      language back via `full_lang_id_from_state` + `get_lang_str_full`
 
 ## Phase 3 — Microphone & device selection (done)
 - [x] List available input devices (`cpal` enumerate)

@@ -27,6 +27,8 @@ const SILENCE_RMS_THRESHOLD: f32 = 0.01; // below this RMS counts as silence
 // Gemini analysis (Phase 2).
 // Default model; the user can change it live from the UI dropdown.
 const DEFAULT_MODEL: &str = "gemini-3.5-flash";
+// Transcription language: "auto" (detect) or a 2-letter code like "en".
+const DEFAULT_LANGUAGE: &str = "auto";
 // How often (at most) to ask Claude for fresh question suggestions.
 const ANALYSIS_INTERVAL_SECONDS: u64 = 20;
 // How much recent transcript (in characters) to send as context.
@@ -39,6 +41,8 @@ struct AppState {
     meeting: Arc<Mutex<Option<CurrentMeeting>>>,
     // Selected input device name; None means the system default.
     device: Arc<Mutex<Option<String>>>,
+    // Transcription language ("auto" or a 2-letter code).
+    language: Arc<Mutex<String>>,
 }
 
 /// The meeting currently being recorded into / edited.
@@ -91,9 +95,12 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
     let notes = state.notes.clone();
     let dir = current.dir;
     let device = state.device.lock().ok().and_then(|d| d.clone());
+    let language = state.language.clone();
 
     std::thread::spawn(move || {
-        if let Err(e) = run_pipeline(&app, running.clone(), model, notes, dir.clone(), device) {
+        if let Err(e) =
+            run_pipeline(&app, running.clone(), model, notes, dir.clone(), device, language)
+        {
             let _ = app.emit("transcribe-error", e);
         }
         running.store(false, Ordering::SeqCst);
@@ -175,6 +182,14 @@ fn set_device(app: AppHandle, device: Option<String>, state: State<AppState>) {
     let _ = settings::update(&app, |s| s.device = device);
 }
 
+#[tauri::command]
+fn set_language(app: AppHandle, language: String, state: State<AppState>) {
+    if let Ok(mut current) = state.language.lock() {
+        *current = language.clone();
+    }
+    let _ = settings::update(&app, |s| s.language = Some(language));
+}
+
 #[derive(serde::Serialize)]
 struct SettingsView {
     model: String,
@@ -182,6 +197,7 @@ struct SettingsView {
     save_dir: Option<String>,
     default_save_dir: String,
     has_api_key: bool,
+    language: String,
 }
 
 #[tauri::command]
@@ -193,6 +209,11 @@ fn get_settings(app: AppHandle, state: State<AppState>) -> SettingsView {
         .map(|m| m.clone())
         .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
     let device = state.device.lock().ok().and_then(|d| d.clone());
+    let language = state
+        .language
+        .lock()
+        .map(|l| l.clone())
+        .unwrap_or_else(|_| DEFAULT_LANGUAGE.to_string());
     let default_save_dir = app
         .path()
         .app_data_dir()
@@ -204,6 +225,7 @@ fn get_settings(app: AppHandle, state: State<AppState>) -> SettingsView {
         save_dir: s.save_dir,
         default_save_dir,
         has_api_key: settings::has_api_key(),
+        language,
     }
 }
 
@@ -282,7 +304,8 @@ fn delete_meeting(app: AppHandle, id: String, state: State<AppState>) -> Result<
 }
 
 fn model_path() -> String {
-    format!("{}/models/ggml-base.en.bin", env!("CARGO_MANIFEST_DIR"))
+    // Multilingual base model (supports auto-detect + ~99 languages).
+    format!("{}/models/ggml-base.bin", env!("CARGO_MANIFEST_DIR"))
 }
 
 /// Join the transcript history and keep only the most recent `max_chars`
@@ -318,6 +341,7 @@ fn run_pipeline(
     notes: Arc<Mutex<String>>,
     dir: PathBuf,
     device: Option<String>,
+    language: Arc<Mutex<String>>,
 ) -> Result<(), String> {
     // Load the model first so any error surfaces before we touch the mic.
     let transcriber = Transcriber::new(&model_path())?;
@@ -343,6 +367,7 @@ fn run_pipeline(
     }
     let mut transcript_history: Vec<String> = Vec::new();
     let mut last_analysis = Instant::now();
+    let mut last_lang: Option<String> = None;
 
     let _ = app.emit("listening-started", ());
 
@@ -354,8 +379,20 @@ fn run_pipeline(
         if !speech {
             return; // silence: recorded, but nothing to transcribe
         }
-        match transcriber.transcribe(&resampled) {
-            Ok(text) if !text.is_empty() => {
+        let lang = language
+            .lock()
+            .map(|l| l.clone())
+            .unwrap_or_else(|_| DEFAULT_LANGUAGE.to_string());
+        match transcriber.transcribe(&resampled, &lang) {
+            Ok(t) if !t.text.is_empty() => {
+                // Surface the detected/used language when it changes.
+                if let Some(detected) = &t.language {
+                    if last_lang.as_deref() != Some(detected.as_str()) {
+                        last_lang = Some(detected.clone());
+                        let _ = app.emit("language-detected", detected.clone());
+                    }
+                }
+                let text = t.text;
                 transcript_history.push(text.clone());
                 let _ = meeting::append_transcript(&dir, &text);
                 let _ = app.emit("transcript", TranscriptPayload { text });
@@ -461,6 +498,9 @@ pub fn run() {
                 notes: Arc::new(Mutex::new(String::new())),
                 meeting: Arc::new(Mutex::new(None)),
                 device: Arc::new(Mutex::new(saved.device)),
+                language: Arc::new(Mutex::new(
+                    saved.language.unwrap_or_else(|| DEFAULT_LANGUAGE.to_string()),
+                )),
             });
             Ok(())
         })
@@ -478,7 +518,8 @@ pub fn run() {
             set_device,
             get_settings,
             set_save_dir,
-            set_api_key
+            set_api_key,
+            set_language
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

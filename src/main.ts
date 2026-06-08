@@ -25,6 +25,8 @@ const settingsBtn = document.querySelector<HTMLButtonElement>("#settings-btn")!;
 const settingsEl = document.querySelector<HTMLElement>("#settings")!;
 const settingsCloseEl = document.querySelector<HTMLButtonElement>("#settings-close")!;
 const activeModelEl = document.querySelector<HTMLSpanElement>("#active-model")!;
+const activeLangEl = document.querySelector<HTMLSpanElement>("#active-lang")!;
+const langSelect = document.querySelector<HTMLSelectElement>("#lang-select")!;
 const saveDirEl = document.querySelector<HTMLSpanElement>("#save-dir")!;
 const chooseDirBtn = document.querySelector<HTMLButtonElement>("#choose-dir")!;
 const resetDirBtn = document.querySelector<HTMLButtonElement>("#reset-dir")!;
@@ -38,6 +40,7 @@ type SettingsView = {
   save_dir: string | null;
   default_save_dir: string;
   has_api_key: boolean;
+  language: string;
 };
 
 type MeetingMeta = {
@@ -129,6 +132,27 @@ deviceSelect.addEventListener("change", () => {
   });
 });
 
+function cap(s: string): string {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
+// Reflect the chosen language; when auto, append the detected language if known.
+function updateLangChip(detected?: string) {
+  if (langSelect.value === "auto") {
+    activeLangEl.textContent = detected ? `Auto · ${cap(detected)}` : "Auto";
+  } else {
+    const opt = langSelect.options[langSelect.selectedIndex];
+    activeLangEl.textContent = opt ? opt.text : langSelect.value;
+  }
+}
+
+langSelect.addEventListener("change", () => {
+  invoke("set_language", { language: langSelect.value }).catch((err) => {
+    statusText.textContent = `Error setting language: ${err}`;
+  });
+  updateLangChip();
+});
+
 // Populate the input-device dropdown (options only; selection synced later).
 async function loadDevices() {
   try {
@@ -158,9 +182,11 @@ async function refreshSettings() {
     const s = await invoke<SettingsView>("get_settings");
     modelSelect.value = s.model;
     deviceSelect.value = s.device ?? "";
+    langSelect.value = s.language;
     showSaveDir(s);
     showKeyStatus(s.has_api_key);
     updateModelChip();
+    updateLangChip();
   } catch (err) {
     statusText.textContent = `Error loading settings: ${err}`;
   }
@@ -380,6 +406,11 @@ listen<string>("analysis-disabled", (event) => {
 
 listen<string>("analysis-error", (event) => {
   statusText.textContent = `Analysis error: ${event.payload}`;
+});
+
+// Detected transcription language (meaningful when language = auto).
+listen<string>("language-detected", (event) => {
+  if (langSelect.value === "auto") updateLangChip(event.payload);
 });
 
 // Auto-generated meeting title (on stop, if still untitled). Don't clobber a

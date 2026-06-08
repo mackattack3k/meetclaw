@@ -7,6 +7,12 @@ pub struct Transcriber {
     ctx: WhisperContext,
 }
 
+pub struct Transcription {
+    pub text: String,
+    /// Full language name (e.g. "english"), detected when `language` is "auto".
+    pub language: Option<String>,
+}
+
 impl Transcriber {
     pub fn new(model_path: &str) -> Result<Self, String> {
         let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
@@ -14,15 +20,17 @@ impl Transcriber {
         Ok(Self { ctx })
     }
 
-    /// Transcribe one window of 16 kHz mono audio. Returns the joined text.
-    pub fn transcribe(&self, samples: &[f32]) -> Result<String, String> {
+    /// Transcribe one window of 16 kHz mono audio. `language` is a 2-letter code
+    /// (e.g. "en") or "auto" to let whisper detect it. Returns the text plus the
+    /// language whisper used/detected.
+    pub fn transcribe(&self, samples: &[f32], language: &str) -> Result<Transcription, String> {
         let mut state = self
             .ctx
             .create_state()
             .map_err(|e| format!("failed to create whisper state: {e}"))?;
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(Some("en"));
+        params.set_language(Some(language));
         params.set_translate(false);
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -44,6 +52,16 @@ impl Transcriber {
                 text.push(' ');
             }
         }
-        Ok(text.trim().to_string())
+
+        let language = state
+            .full_lang_id_from_state()
+            .ok()
+            .and_then(whisper_rs::get_lang_str_full)
+            .map(|s| s.to_string());
+
+        Ok(Transcription {
+            text: text.trim().to_string(),
+            language,
+        })
     }
 }

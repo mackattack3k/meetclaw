@@ -14,7 +14,8 @@ microphone ──cpal──▶ mono f32 buffer ──resample 16kHz──▶ whi
 - **Audio**: `cpal` captures the default input device, downmixed to mono.
   See `src-tauri/src/audio.rs`.
 - **Transcription**: `whisper-rs` (bindings to whisper.cpp) runs the
-  `ggml-base.en` model on 5-second windows. See `src-tauri/src/transcribe.rs`.
+  multilingual `ggml-base` model on silence-delimited windows, with auto-detect or
+a chosen language. See `src-tauri/src/transcribe.rs`.
 - **Orchestration**: a worker thread buffers audio, resamples to 16 kHz, runs
   whisper, and emits `transcript` events. See `src-tauri/src/lib.rs`.
 - **UI**: vanilla TypeScript listens for events and appends transcript lines.
@@ -25,11 +26,11 @@ microphone ──cpal──▶ mono f32 buffer ──resample 16kHz──▶ whi
 - Rust + Cargo
 - Node + npm
 - `cmake` (whisper.cpp builds from source) — `brew install cmake`
-- The model file at `src-tauri/models/ggml-base.en.bin` (~141 MB).
+- The model file at `src-tauri/models/ggml-base.bin` (~141 MB).
   Download:
   ```
-  curl -L -o src-tauri/models/ggml-base.en.bin \
-    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+  curl -L -o src-tauri/models/ggml-base.bin \
+    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
   ```
 
 ## Run
