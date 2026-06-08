@@ -28,6 +28,7 @@ const MAX_CONTEXT_CHARS: usize = 4000;
 struct AppState {
     running: Arc<AtomicBool>,
     model: Arc<Mutex<String>>,
+    notes: Arc<Mutex<String>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -48,9 +49,10 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
     }
     let running = state.running.clone();
     let model = state.model.clone();
+    let notes = state.notes.clone();
 
     std::thread::spawn(move || {
-        if let Err(e) = run_pipeline(&app, running.clone(), model) {
+        if let Err(e) = run_pipeline(&app, running.clone(), model, notes) {
             let _ = app.emit("transcribe-error", e);
         }
         running.store(false, Ordering::SeqCst);
@@ -69,6 +71,13 @@ fn stop_listening(state: State<AppState>) {
 fn set_model(model: String, state: State<AppState>) {
     if let Ok(mut current) = state.model.lock() {
         *current = model;
+    }
+}
+
+#[tauri::command]
+fn set_notes(notes: String, state: State<AppState>) {
+    if let Ok(mut current) = state.notes.lock() {
+        *current = notes;
     }
 }
 
@@ -91,6 +100,7 @@ fn run_pipeline(
     app: &AppHandle,
     running: Arc<AtomicBool>,
     model: Arc<Mutex<String>>,
+    notes: Arc<Mutex<String>>,
 ) -> Result<(), String> {
     // Load the model first so any error surfaces before we touch the mic.
     let transcriber = Transcriber::new(&model_path())?;
@@ -147,9 +157,16 @@ fn run_pipeline(
                                 .lock()
                                 .map(|m| m.clone())
                                 .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+                            let user_notes =
+                                notes.lock().map(|n| n.clone()).unwrap_or_default();
                             let app_for_analysis = app.clone();
                             std::thread::spawn(move || {
-                                match analyze::suggest_questions(&key, &selected_model, &context) {
+                                match analyze::suggest_questions(
+                                    &key,
+                                    &selected_model,
+                                    &context,
+                                    &user_notes,
+                                ) {
                                     Ok(questions) if !questions.is_empty() => {
                                         let _ = app_for_analysis
                                             .emit("suggestions", SuggestionsPayload { questions });
@@ -188,13 +205,15 @@ pub fn run() {
             app.manage(AppState {
                 running: Arc::new(AtomicBool::new(false)),
                 model: Arc::new(Mutex::new(DEFAULT_MODEL.to_string())),
+                notes: Arc::new(Mutex::new(String::new())),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             start_listening,
             stop_listening,
-            set_model
+            set_model,
+            set_notes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

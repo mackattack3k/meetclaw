@@ -12,9 +12,11 @@ use serde_json::json;
 const GEMINI_MODELS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
 const SYSTEM_PROMPT: &str = "You are a sharp, quiet third participant sitting in on a live meeting. \
-You are given a rolling transcript of what has been said so far. \
+You are given a rolling transcript of what has been said so far, and sometimes the user's own notes. \
 Suggest up to 3 specific, insightful questions the user might want to ask next, \
 grounded in what is actually being discussed. \
+When the user has written notes, take them into account: build on what they clearly care about, \
+and do not re-suggest questions about things they have already written down. \
 Prefer questions that surface assumptions, clarify scope, or move the conversation forward. \
 Do not suggest generic questions. If nothing useful comes to mind, return an empty list.";
 
@@ -35,19 +37,25 @@ pub fn suggest_questions(
     api_key: &str,
     model: &str,
     transcript: &str,
+    notes: &str,
 ) -> Result<Vec<String>, String> {
     let url = format!("{GEMINI_MODELS_URL}/{model}:generateContent");
+
+    let notes_section = if notes.trim().is_empty() {
+        String::new()
+    } else {
+        format!("The user's own notes so far:\n\n{notes}\n\n")
+    };
+    let user_text = format!(
+        "{notes_section}Live meeting transcript so far:\n\n{transcript}\n\n\
+         Suggest up to 3 questions the user might want to ask next."
+    );
 
     let body = json!({
         "systemInstruction": { "parts": [{ "text": SYSTEM_PROMPT }] },
         "contents": [{
             "role": "user",
-            "parts": [{
-                "text": format!(
-                    "Live meeting transcript so far:\n\n{transcript}\n\n\
-                     Suggest up to 3 questions the user might want to ask next."
-                )
-            }]
+            "parts": [{ "text": user_text }]
         }],
         "generationConfig": {
             "responseMimeType": "application/json",

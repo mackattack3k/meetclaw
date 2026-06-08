@@ -143,6 +143,29 @@ body {
   line-height: 1.5;
 }
 
+.notes {
+  flex: 1;
+  resize: none;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.notes::placeholder {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.notes:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .suggestion {
   margin: 0 0 12px;
   padding: 10px 12px;

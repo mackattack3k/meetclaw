@@ -9,6 +9,7 @@ const statusDot = document.querySelector<HTMLSpanElement>("#status-dot")!;
 const transcriptEl = document.querySelector<HTMLElement>("#transcript")!;
 const suggestionsEl = document.querySelector<HTMLElement>("#suggestions")!;
 const modelSelect = document.querySelector<HTMLSelectElement>("#model-select")!;
+const notesEl = document.querySelector<HTMLTextAreaElement>("#notes")!;
 
 function setListening(on: boolean) {
   listening = on;
@@ -74,6 +75,17 @@ async function applyModel() {
 
 modelSelect.addEventListener("change", applyModel);
 applyModel(); // push the default on load
+
+// Sync the user's notes to the backend, debounced so we don't spam on each keystroke.
+let notesTimer: number | undefined;
+notesEl.addEventListener("input", () => {
+  window.clearTimeout(notesTimer);
+  notesTimer = window.setTimeout(() => {
+    invoke("set_notes", { notes: notesEl.value }).catch((err) => {
+      statusText.textContent = `Error saving notes: ${err}`;
+    });
+  }, 400);
+});
 
 // Backend events
 listen<{ text: string }>("transcript", (event) => {
