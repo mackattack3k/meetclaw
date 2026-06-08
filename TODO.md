@@ -85,6 +85,12 @@
       text greyed then commits it, and dedupe/reconcile of overlapping windows.
       Tradeoff: more compute (overlapping re-decodes) — may want `tiny`/`base`
       + the `metal` feature to keep up. Bigger change to the pipeline.
+- [ ] Label different speakers (diarization). Whisper doesn't do this natively.
+      Options: (a) cheap 2-way labeling once system-audio (Phase 4) lands —
+      mic = "Me", system = "Others"; (b) real diarization via speaker embeddings
+      per segment + clustering (e.g. a pyannote-style model), heavier and no
+      easy Rust path; (c) prompt the LLM to guess speaker turns from transcript
+      content (rough). Show speaker tags in the transcript; feed them to Gemini.
 
 ## Phase 4 — System audio (digital meetings)
 - [ ] Capture other participants' audio (Zoom/Meet/Teams)
