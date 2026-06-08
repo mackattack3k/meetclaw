@@ -120,6 +120,10 @@
       (today it's spawned from `src-tauri/binaries/`, built via
       `src-tauri/syscap/build.sh`)
 - [ ] Auto-trigger / guide the Screen Recording permission prompt on first use
+- [ ] System audio is captured at a low level (recordings peak ~0.05–0.08).
+      Downstream normalization now compensates for transcription, but consider
+      boosting/gain at the capture stage (Swift helper) so the saved WAV isn't
+      so quiet for playback.
 
 ## Phase 5 — Vision (whiteboard / screen)
 - [ ] Camera capture at ~1 Hz
