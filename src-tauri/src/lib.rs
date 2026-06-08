@@ -516,6 +516,7 @@ fn run_pipeline(
     let mut transcript_history: Vec<String> = Vec::new();
     let mut last_analysis = Instant::now();
     let mut last_lang: Option<String> = None;
+    let mut last_emitted: Option<String> = None;
     // Auto-detect hysteresis state (only used when language = "auto").
     let mut cur_lang: Option<(String, String)> = None; // (code, full name)
     let mut pending_lang: Option<String> = None;
@@ -577,8 +578,9 @@ fn run_pipeline(
                 .unwrap_or_else(|| "auto".to_string())
         };
 
-        let prompt = recent_context(&transcript_history, 200);
-        match transcriber.transcribe(&resampled, &chosen, &prompt) {
+        // No initial_prompt here: feeding prior text back makes whisper loop on
+        // hallucinations with quiet/ambiguous audio.
+        match transcriber.transcribe(&resampled, &chosen, "") {
             Ok(t) if !t.text.is_empty() => {
                 // Surface the active language when it changes.
                 let display = if user_setting == "auto" {
@@ -593,6 +595,11 @@ fn run_pipeline(
                     }
                 }
                 let text = t.text;
+                // Drop a line that just repeats the previous one (hallucination loop).
+                if last_emitted.as_deref() == Some(text.as_str()) {
+                    return;
+                }
+                last_emitted = Some(text.clone());
                 transcript_history.push(text.clone());
                 let _ = meeting::append_transcript(&dir, &text);
                 let _ = app.emit("transcript", TranscriptPayload { text });
