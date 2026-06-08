@@ -76,6 +76,15 @@
 - [x] Flush the tail on Stop so the last seconds aren't lost
 - [x] Accept i16/u16/i32/i8/u8 device formats (not just f32)
 - [ ] Better resampler (linear → windowed-sinc) if transcription needs it
+- [ ] Real-time streaming transcription (instead of chunk-on-pause). Today we
+      wait for a silence boundary, then transcribe the whole chunk, so text
+      appears in bursts. Stream it: keep a rolling buffer and re-decode a
+      sliding window every ~0.5–1s, emitting *interim* text that's replaced as
+      the window advances and *finalized* at silence (whisper.cpp `stream`
+      pattern). Needs: interim-vs-final transcript events, UI that shows interim
+      text greyed then commits it, and dedupe/reconcile of overlapping windows.
+      Tradeoff: more compute (overlapping re-decodes) — may want `tiny`/`base`
+      + the `metal` feature to keep up. Bigger change to the pipeline.
 
 ## Phase 4 — System audio (digital meetings)
 - [ ] Capture other participants' audio (Zoom/Meet/Teams)
