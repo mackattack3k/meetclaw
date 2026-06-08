@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use audio::{resample, AudioCapture};
@@ -502,7 +503,52 @@ pub fn run() {
                     saved.language.unwrap_or_else(|| DEFAULT_LANGUAGE.to_string()),
                 )),
             });
+
+            // Native macOS menu: Settings… bound to Cmd+, under the app menu,
+            // plus a standard Edit menu so copy/paste works in the notes field.
+            let handle = app.handle();
+            let settings_item = MenuItemBuilder::new("Settings…")
+                .id("settings")
+                .accelerator("CmdOrCtrl+,")
+                .build(handle)?;
+            let app_menu = SubmenuBuilder::new(handle, "MeetClaw")
+                .about(None)
+                .separator()
+                .item(&settings_item)
+                .separator()
+                .services()
+                .separator()
+                .hide()
+                .hide_others()
+                .show_all()
+                .separator()
+                .quit()
+                .build()?;
+            let edit_menu = SubmenuBuilder::new(handle, "Edit")
+                .undo()
+                .redo()
+                .separator()
+                .cut()
+                .copy()
+                .paste()
+                .select_all()
+                .build()?;
+            let window_menu = SubmenuBuilder::new(handle, "Window")
+                .minimize()
+                .close_window()
+                .build()?;
+            let menu = MenuBuilder::new(handle)
+                .items(&[&app_menu, &edit_menu, &window_menu])
+                .build()?;
+            app.set_menu(menu)?;
+
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            let id: &str = event.id.as_ref();
+            if id == "settings" {
+                let _ = app.emit("menu:settings", ());
+            }
         })
         .invoke_handler(tauri::generate_handler![
             start_listening,

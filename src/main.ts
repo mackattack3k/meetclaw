@@ -195,11 +195,22 @@ async function refreshSettings() {
 function hideSettings() {
   settingsEl.classList.add("hidden");
 }
-settingsBtn.addEventListener("click", () => {
+function openSettings() {
   refreshSettings();
   settingsEl.classList.remove("hidden");
-});
+}
+settingsBtn.addEventListener("click", openSettings);
 settingsCloseEl.addEventListener("click", hideSettings);
+
+// Native macOS menu: Settings… (Cmd+,)
+listen("menu:settings", openSettings);
+// Esc closes the settings/library overlays.
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    hideSettings();
+    hideLibrary();
+  }
+});
 settingsEl.addEventListener("click", (e) => {
   if (e.target === settingsEl) hideSettings();
 });

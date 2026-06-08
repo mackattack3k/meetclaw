@@ -89,6 +89,9 @@
 - [x] Consolidate model, input device, save location, and API key into a
       dedicated settings panel; slim the top bar (Library / New / Settings)
 - [x] Self-host fonts (offline, via @fontsource) — no Google Fonts CDN
+- [x] Native macOS menu bar: Settings… bound to Cmd+, ; standard Edit menu
+      (copy/paste in notes), Window menu; Esc closes overlays
+- [ ] Detached native settings *window* (currently a panel opened via Cmd+,)
 
 ## Refinements / tech debt
 - [x] Fix words clipped at chunk boundaries (done via silence-based chunking)
