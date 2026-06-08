@@ -76,6 +76,14 @@
 - [x] Flush the tail on Stop so the last seconds aren't lost
 - [x] Accept i16/u16/i32/i8/u8 device formats (not just f32)
 - [ ] Better resampler (linear → windowed-sinc) if transcription needs it
+- [ ] Two-tier transcript: fast live tier (current chunked) for immediate
+      notes + a slower, higher-quality WHOLE-FILE re-transcription of the saved
+      audio.wav on Stop, which replaces transcript.txt. VERIFIED worth it: on a
+      94s clip the live chunked transcript was fragmented with errors
+      ("camera" vs "counter", "728" vs "27 28 years old", junk "p_j_" tokens),
+      while a single whole-file pass was coherent and accurate. Try it with
+      `cargo run --example transcribe -- <audio.wav>` (see src-tauri/examples).
+      Optional: use a bigger model (small/medium) for the final pass.
 - [ ] Real-time streaming transcription (instead of chunk-on-pause). Today we
       wait for a silence boundary, then transcribe the whole chunk, so text
       appears in bursts. Stream it: keep a rolling buffer and re-decode a
