@@ -106,6 +106,21 @@
       easy Rust path; (c) prompt the LLM to guess speaker turns from transcript
       content (rough). Show speaker tags in the transcript; feed them to Gemini.
 
+## Integrations
+- [ ] Calendar sync for meeting metadata — pull the current/next event from the
+      user's calendar (macOS EventKit, or Google Calendar via the MCP/OAuth we
+      explored) and prefill the meeting title, time, and attendees. Saves a
+      `meeting.json` with richer metadata and gives Gemini attendee/agenda
+      context for better questions.
+- [ ] Tool/action suggestions during the meeting — let the assistant suggest
+      concrete things to check in GitHub or AWS based on what's discussed
+      (e.g. "check the deploy status of service X", "look at PR #123", "is the
+      RDS failover configured?"). Two tiers: (a) read-only suggestions as text
+      (no creds, just smart prompts) — easy; (b) actually run read-only CLI/API
+      lookups (`gh`, `aws`) and surface results — needs a tool-calling loop
+      (Gemini function calling) + credential handling + an allowlist of safe,
+      read-only commands. Start with (a).
+
 ## Phase 4 — System audio (digital meetings) (partial)
 - [x] Capture other participants' audio via ScreenCaptureKit — Swift helper
       (`src-tauri/syscap/main.swift`) streams 48 kHz mono PCM to a Rust sidecar
