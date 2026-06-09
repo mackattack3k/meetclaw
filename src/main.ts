@@ -64,11 +64,14 @@ type MeetingDetail = {
   suggestions: string[][];
 };
 
-// The current meeting is "empty" if nothing has been typed or transcribed —
-// then "New" would just create a redundant blank meeting, so disable it.
+// The current meeting is "empty" only if title, notes, transcript, and audio are
+// all empty — then "New" would just create a redundant blank meeting.
 function meetingIsEmpty(): boolean {
   return (
-    notesEl.value.trim() === "" && transcriptEl.querySelector(".line") === null
+    titleInput.value.trim() === "" &&
+    notesEl.value.trim() === "" &&
+    transcriptEl.querySelector(".line") === null &&
+    playerEl.classList.contains("hidden")
   );
 }
 
@@ -296,6 +299,7 @@ notesEl.addEventListener("input", () => {
 
 let titleTimer: number | undefined;
 titleInput.addEventListener("input", () => {
+  updateNewButton();
   window.clearTimeout(titleTimer);
   titleTimer = window.setTimeout(() => {
     invoke("set_title", { title: titleInput.value }).catch((err) => {
@@ -346,6 +350,7 @@ async function loadAudio(id: string) {
     seekEl.value = "0";
     timeEl.textContent = "0:00";
     playerEl.classList.remove("hidden");
+    updateNewButton();
   } catch {
     clearPlayer(); // meeting has no saved audio yet
   }
