@@ -64,6 +64,18 @@ type MeetingDetail = {
   suggestions: string[][];
 };
 
+// The current meeting is "empty" if nothing has been typed or transcribed —
+// then "New" would just create a redundant blank meeting, so disable it.
+function meetingIsEmpty(): boolean {
+  return (
+    notesEl.value.trim() === "" && transcriptEl.querySelector(".line") === null
+  );
+}
+
+function updateNewButton() {
+  newBtn.disabled = meetingIsEmpty();
+}
+
 function setListening(on: boolean) {
   listening = on;
   toggleBtn.textContent = on ? "Stop" : "Start";
@@ -83,6 +95,7 @@ function appendTranscript(text: string) {
   line.textContent = text;
   transcriptEl.appendChild(line);
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  updateNewButton();
 }
 
 // Replace the suggestions panel with the latest set of questions.
@@ -265,9 +278,12 @@ saveKeyBtn.addEventListener("click", async () => {
   await refreshSettings();
 })();
 
+updateNewButton(); // start disabled on an empty meeting
+
 // Sync the user's notes to the backend, debounced so we don't spam on each keystroke.
 let notesTimer: number | undefined;
 notesEl.addEventListener("input", () => {
+  updateNewButton();
   window.clearTimeout(notesTimer);
   notesTimer = window.setTimeout(() => {
     invoke("set_notes", { notes: notesEl.value }).catch((err) => {
@@ -294,6 +310,7 @@ function resetPanes() {
   transcriptEl.replaceChildren(makePlaceholder("Transcript will appear here…"));
   noteInSuggestions("Questions will appear here…");
   clearPlayer();
+  updateNewButton();
 }
 
 // --- Audio playback of a loaded meeting ---
@@ -460,6 +477,7 @@ async function openMeeting(id: string) {
     }
 
     void loadAudio(id);
+    updateNewButton();
     hideLibrary();
     statusText.textContent = "Loaded meeting. Press play to listen, or start to keep recording.";
   } catch (err) {
@@ -515,6 +533,7 @@ listen<string>("transcript-finalized", (event) => {
   } else {
     for (const s of sentences) appendTranscript(s);
   }
+  updateNewButton();
   statusText.textContent = "Transcript refined.";
 });
 
