@@ -160,7 +160,7 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         .unwrap_or_else(|_| DEFAULT_AUDIO_SOURCE.to_string());
 
     std::thread::spawn(move || {
-        let established = match run_pipeline(
+        let outcome = match run_pipeline(
             &app,
             running.clone(),
             model,
@@ -170,10 +170,10 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
             language,
             source,
         ) {
-            Ok(lang) => lang,
+            Ok(o) => o,
             Err(e) => {
                 let _ = app.emit("transcribe-error", e);
-                None
+                PipelineOutcome::default()
             }
         };
         running.store(false, Ordering::SeqCst);
@@ -181,7 +181,13 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         let _ = meeting::finalize_wav(&dir);
         let _ = app.emit("listening-stopped", ());
         // High-quality whole-file re-transcription replaces the live transcript.
-        finalize_transcript(&app, &dir, &language_for_final, established);
+        finalize_transcript(
+            &app,
+            &dir,
+            &language_for_final,
+            outcome.established,
+            outcome.language_spans,
+        );
         // Auto-name the meeting from the (now refined) transcript if still untitled.
         maybe_generate_title(&app, &dir, &model_for_title);
     });
@@ -196,6 +202,7 @@ fn finalize_transcript(
     dir: &std::path::Path,
     language: &Arc<Mutex<String>>,
     established: Option<String>,
+    language_spans: Vec<(usize, String)>,
 ) {
     let samples = meeting::read_wav_samples(dir);
     if samples.is_empty() {
@@ -212,25 +219,85 @@ fn finalize_transcript(
         .lock()
         .map(|l| l.clone())
         .unwrap_or_else(|_| DEFAULT_LANGUAGE.to_string());
-    // On "auto", prefer the language the live tier confidently settled on over
-    // the whole meeting; fall back to whole-file auto-detect.
-    let lang = if setting == "auto" {
-        established.unwrap_or_else(|| "auto".to_string())
+
+    // A forced language transcribes the whole file in one pass. On "auto" we
+    // split by language run so a bilingual meeting's minority-language stretches
+    // aren't forced into the majority language (#6).
+    let text = if setting == "auto" {
+        finalize_multilingual(&transcriber, &samples, &language_spans, established)
     } else {
-        setting
+        transcriber
+            .transcribe(&samples, &setting, "")
+            .map(|r| r.text.trim().to_string())
+            .unwrap_or_default()
     };
 
-    if let Ok(result) = transcriber.transcribe(&samples, &lang, "") {
-        let text = result.text.trim().to_string();
-        // Guard against a collapsed whole-file pass wiping a good live transcript:
-        // refuse to replace if the result is drastically shorter (< 25%) than what
-        // the live tier already produced.
-        let live_len = meeting::read_transcript(dir).trim().len();
-        if !text.is_empty() && text.len() * 4 >= live_len {
-            let _ = meeting::overwrite_transcript(dir, &text);
-            let _ = app.emit("transcript-finalized", text);
+    // Guard against a collapsed pass wiping a good live transcript: refuse to
+    // replace if the result is drastically shorter (< 25%) than the live tier's.
+    let live_len = meeting::read_transcript(dir).trim().len();
+    if !text.is_empty() && text.len() * 4 >= live_len {
+        let _ = meeting::overwrite_transcript(dir, &text);
+        let _ = app.emit("transcript-finalized", text);
+    }
+}
+
+/// Final-pass transcription for "auto" language. Merges the live tier's
+/// per-chunk language detections into contiguous same-language runs and
+/// transcribes each run over its own audio slice, then joins the results. When
+/// only one language was seen (the common, monolingual case) this collapses to a
+/// single whole-file pass — identical to the previous behavior, no regression.
+fn finalize_multilingual(
+    transcriber: &Transcriber,
+    samples: &[f32],
+    language_spans: &[(usize, String)],
+    established: Option<String>,
+) -> String {
+    // Collapse consecutive same-language detections into runs (start, language).
+    let mut runs: Vec<(usize, String)> = Vec::new();
+    for (start, lang) in language_spans {
+        if runs.last().map(|(_, l)| l == lang).unwrap_or(false) {
+            continue;
+        }
+        runs.push((*start, lang.clone()));
+    }
+
+    // Zero or one language: one pass with full context, preferring the run's
+    // language, then the live tier's settled language, then whole-file detect.
+    if runs.len() <= 1 {
+        let lang = runs
+            .into_iter()
+            .next()
+            .map(|(_, l)| l)
+            .or(established)
+            .unwrap_or_else(|| "auto".to_string());
+        return transcriber
+            .transcribe(samples, &lang, "")
+            .map(|r| r.text.trim().to_string())
+            .unwrap_or_default();
+    }
+
+    // Multiple languages: transcribe each run over [run.start, next.start).
+    // The first run starts at 0 so any leading audio is included.
+    let mut parts: Vec<String> = Vec::new();
+    for i in 0..runs.len() {
+        let start = if i == 0 { 0 } else { runs[i].0 };
+        let end = if i + 1 < runs.len() {
+            runs[i + 1].0
+        } else {
+            samples.len()
+        }
+        .min(samples.len());
+        if start >= end {
+            continue;
+        }
+        if let Ok(r) = transcriber.transcribe(&samples[start..end], &runs[i].1, "") {
+            let t = r.text.trim().to_string();
+            if !t.is_empty() {
+                parts.push(t);
+            }
         }
     }
+    parts.join("\n")
 }
 
 /// If the meeting has no real title yet, ask Gemini to name it from its content.
@@ -560,6 +627,16 @@ fn normalize_for_asr(samples: &[f32]) -> Vec<f32> {
     out
 }
 
+/// What `run_pipeline` hands back to the finalizer once recording stops.
+#[derive(Default)]
+struct PipelineOutcome {
+    /// Language the live tier confidently settled on, if any (whole-file fallback).
+    established: Option<String>,
+    /// Per-chunk language detections: (sample offset in the recorded 16 kHz
+    /// audio, language code). Drives per-language splitting in the final pass.
+    language_spans: Vec<(usize, String)>,
+}
+
 fn run_pipeline(
     app: &AppHandle,
     running: Arc<AtomicBool>,
@@ -569,7 +646,7 @@ fn run_pipeline(
     device: Option<String>,
     language: Arc<Mutex<String>>,
     source: String,
-) -> Result<Option<String>, String> {
+) -> Result<PipelineOutcome, String> {
     // Load the model first so any error surfaces before we touch the mic.
     let transcriber = Transcriber::new(&model_path(app))?;
 
@@ -627,12 +704,20 @@ fn run_pipeline(
     let mut last_level_emit = Instant::now();
     let mut level_accum: f32 = 0.0;
 
+    // Language timeline: (sample offset in the recorded 16 kHz audio -> detected
+    // language) so the final pass can re-transcribe each language run on its own
+    // (#6). `samples_written` tracks the running length of audio.pcm/.wav.
+    let mut language_spans: Vec<(usize, String)> = Vec::new();
+    let mut samples_written: usize = 0;
+
     // Process one finished chunk: always record its audio; if it contained
     // speech, transcribe it and periodically ask for suggestions.
     let mut process_chunk = |chunk: Vec<f32>, speech: bool| {
         let resampled = resample(&chunk, native_rate, TARGET_RATE);
         // Record the original audio; transcribe a level-boosted copy.
+        let chunk_start = samples_written;
         let _ = meeting::append_pcm(&dir, &f32_to_i16(&resampled));
+        samples_written += resampled.len();
         if !speech {
             return; // silence: recorded, but nothing to transcribe
         }
@@ -680,6 +765,10 @@ fn run_pipeline(
                 .map(|(c, _)| c.clone())
                 .unwrap_or_else(|| "auto".to_string())
         };
+
+        // Record this chunk's language at its offset so the final pass can split
+        // a bilingual meeting by language run (#6).
+        language_spans.push((chunk_start, chosen.clone()));
 
         // No initial_prompt here: feeding prior text back makes whisper loop on
         // hallucinations with quiet/ambiguous audio.
@@ -821,7 +910,10 @@ fn run_pipeline(
     drop(process_chunk);
     // Dropping the capture stops the audio stream.
     drop(capture);
-    Ok(cur_lang.map(|(code, _)| code))
+    Ok(PipelineOutcome {
+        established: cur_lang.map(|(code, _)| code),
+        language_spans,
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
