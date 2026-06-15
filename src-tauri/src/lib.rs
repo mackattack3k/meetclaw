@@ -375,7 +375,7 @@ fn set_notes(app: AppHandle, notes: String, state: State<AppState>) -> Result<()
     // Don't spin up a meeting folder just to store empty notes (e.g. the user
     // typed then cleared the pane before anything else exists).
     let has_meeting = state.meeting.lock().map(|g| g.is_some()).unwrap_or(false);
-    if notes.is_empty() && !has_meeting {
+    if notes.trim().is_empty() && !has_meeting {
         return Ok(());
     }
     // Ensure a meeting exists so notes are always written to disk and survive a
