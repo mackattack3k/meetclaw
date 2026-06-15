@@ -79,12 +79,20 @@ func startSession() {
         let input = try AVCaptureDeviceInput(device: device)
         let session = AVCaptureSession()
         session.sessionPreset = .high
-        if session.canAddInput(input) { session.addInput(input) }
+        guard session.canAddInput(input) else {
+            logErr("cannot add camera input")
+            exit(4)
+        }
+        session.addInput(input)
         let outputData = AVCaptureVideoDataOutput()
         outputData.alwaysDiscardsLateVideoFrames = true
         outputData.setSampleBufferDelegate(
             delegate, queue: DispatchQueue(label: "meetclaw.camera"))
-        if session.canAddOutput(outputData) { session.addOutput(outputData) }
+        guard session.canAddOutput(outputData) else {
+            logErr("cannot add camera output")
+            exit(4)
+        }
+        session.addOutput(outputData)
         session.startRunning()
         activeSession = session
         logErr("capturing camera")
