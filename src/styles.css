@@ -27,7 +27,7 @@
 
   --radius: 14px;
   --radius-sm: 10px;
-  --font-title: ui-serif, "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-title: ui-serif, "Iowan Old Style", georgia, "Times New Roman", serif;
   --font-display: "Bricolage Grotesque Variable", "Hanken Grotesk Variable",
     system-ui, sans-serif;
   --font-ui: "Hanken Grotesk Variable", system-ui, -apple-system, sans-serif;

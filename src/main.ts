@@ -91,7 +91,7 @@ function setListening(on: boolean) {
   toggleBtn.classList.toggle("recording", on);
   statusDot.classList.toggle("live", on);
   recPill.classList.toggle("hidden", !on);
-  camLiveEl.classList.toggle("hidden", !on);
+  camLiveEl.classList.toggle("hidden", !(on && cameraOn));
   transcriptLiveEl.classList.toggle("hidden", !on);
   showMeter(on);
   if (on) startRecTimer();
@@ -265,6 +265,7 @@ function setCameraActive(on: boolean) {
   cameraBtn.classList.toggle("active", on);
   cameraBtn.setAttribute("aria-pressed", String(on));
   cameraBtn.textContent = on ? "On" : "Off";
+  camLiveEl.classList.toggle("hidden", !(listening && on));
   if (!on) hideCameraPreview();
 }
 cameraBtn.addEventListener("click", async () => {
