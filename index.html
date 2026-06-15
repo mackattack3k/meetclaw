@@ -30,6 +30,10 @@
         <span id="meter-db" class="meter-db">—</span>
       </div>
 
+      <div id="camera-preview" class="camera-preview hidden" title="Latest camera frame">
+        <img id="camera-img" class="camera-img" alt="Latest camera frame" />
+      </div>
+
       <div class="console">
         <div class="console-actions">
           <button id="library-btn" class="btn btn-ghost">Library</button>
@@ -51,6 +55,19 @@
             <select id="device-select" class="mini-select" title="Input device">
               <option value="">Default</option>
             </select>
+          </div>
+
+          <div class="module">
+            <span class="module-label">Camera</span>
+            <button
+              type="button"
+              class="seg camera-toggle"
+              id="camera-btn"
+              aria-pressed="false"
+              title="Capture camera frames (~1 Hz) while recording"
+            >
+              Off
+            </button>
           </div>
 
           <div class="module">

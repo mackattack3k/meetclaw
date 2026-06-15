@@ -1,5 +1,6 @@
 mod analyze;
 mod audio;
+mod camera;
 mod meeting;
 mod mixer;
 mod settings;
@@ -72,6 +73,9 @@ enum Capture {
 fn syscap_path() -> String {
     format!("{}/binaries/meetclaw-syscap", env!("CARGO_MANIFEST_DIR"))
 }
+fn camera_path() -> String {
+    format!("{}/binaries/meetclaw-camera", env!("CARGO_MANIFEST_DIR"))
+}
 // Analysis cadence. Suggestions fire when EITHER the timer elapses (so a slow,
 // sparse conversation still gets refreshed) OR enough new transcript segments
 // have accumulated (so dense back-and-forth gets suggestions sooner) — but never
@@ -94,6 +98,55 @@ struct AppState {
     language: Arc<Mutex<String>>,
     // Audio source ("mic" or "system").
     audio_source: Arc<Mutex<String>>,
+    // Whether camera capture (~1 Hz) is enabled.
+    camera: Arc<AtomicBool>,
+    // The running camera helper, when capture is active.
+    camera_capture: Arc<Mutex<Option<camera::CameraCapture>>>,
+}
+
+/// Where the latest camera frame is written (app cache); the preview reads it.
+fn preview_frame_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_cache_dir()
+        .map(|d| d.join("camera-frame.jpg"))
+        .map_err(|e| format!("no cache dir: {e}"))
+}
+
+/// Start the camera helper (writing to the preview frame path) and hold it in
+/// state. No-op if it's already running. Errors surface as a `camera-status`.
+fn start_camera(app: &AppHandle, state: &AppState) {
+    // Hold the lock across the whole start so two racing callers (rapid toggles,
+    // or set_camera vs. start_listening) can't both spawn a helper.
+    let mut guard = match state.camera_capture.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    if guard.is_some() {
+        return;
+    }
+    let report = |e: String| {
+        let _ = app.emit("camera-status", format!("Camera unavailable: {e}"));
+    };
+    let path = match preview_frame_path(app) {
+        Ok(p) => p,
+        Err(e) => return report(e),
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return report(format!("create cache dir: {e}"));
+        }
+    }
+    match camera::CameraCapture::start(&camera_path(), path, app.clone()) {
+        Ok(cap) => *guard = Some(cap),
+        Err(e) => report(e),
+    }
+}
+
+/// Stop the camera helper (dropping the guard kills the process).
+fn stop_camera(state: &AppState) {
+    if let Ok(mut guard) = state.camera_capture.lock() {
+        *guard = None;
+    }
 }
 
 /// The meeting currently being recorded into / edited.
@@ -158,6 +211,12 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         .lock()
         .map(|s| s.clone())
         .unwrap_or_else(|_| DEFAULT_AUDIO_SOURCE.to_string());
+    // Ensure capture is running if the camera is enabled (covers a persisted-on
+    // toggle not re-clicked this session). Capture is independent of recording,
+    // so it isn't stopped when recording ends.
+    if state.camera.load(Ordering::SeqCst) {
+        start_camera(&app, &state);
+    }
 
     std::thread::spawn(move || {
         let outcome = match run_pipeline(
@@ -406,6 +465,25 @@ fn set_audio_source(app: AppHandle, source: String, state: State<AppState>) {
     let _ = settings::update(&app, |s| s.audio_source = Some(source));
 }
 
+#[tauri::command]
+fn set_camera(app: AppHandle, enabled: bool, state: State<AppState>) {
+    state.camera.store(enabled, Ordering::SeqCst);
+    let _ = settings::update(&app, |s| s.camera = Some(enabled));
+    // Start/stop capture immediately so the preview works without recording.
+    if enabled {
+        start_camera(&app, &state);
+    } else {
+        stop_camera(&state);
+    }
+}
+
+/// Read the latest camera frame (JPEG) for the live preview.
+#[tauri::command]
+fn read_current_frame(app: AppHandle) -> Result<tauri::ipc::Response, String> {
+    let bytes = std::fs::read(preview_frame_path(&app)?).map_err(|e| format!("no frame: {e}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[derive(serde::Serialize)]
 struct SettingsView {
     model: String,
@@ -415,6 +493,7 @@ struct SettingsView {
     has_api_key: bool,
     language: String,
     audio_source: String,
+    camera: bool,
 }
 
 #[tauri::command]
@@ -449,6 +528,7 @@ fn get_settings(app: AppHandle, state: State<AppState>) -> SettingsView {
         has_api_key: settings::has_api_key(),
         language,
         audio_source,
+        camera: state.camera.load(Ordering::SeqCst),
     }
 }
 
@@ -954,6 +1034,8 @@ pub fn run() {
                         .audio_source
                         .unwrap_or_else(|| DEFAULT_AUDIO_SOURCE.to_string()),
                 )),
+                camera: Arc::new(AtomicBool::new(saved.camera.unwrap_or(false))),
+                camera_capture: Arc::new(Mutex::new(None)),
             });
 
             // Native macOS menu: Settings… bound to Cmd+, under the app menu,
@@ -1024,7 +1106,9 @@ pub fn run() {
             set_save_dir,
             set_api_key,
             set_language,
-            set_audio_source
+            set_audio_source,
+            set_camera,
+            read_current_frame
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
