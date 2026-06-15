@@ -344,6 +344,7 @@ fn render_markdown(d: &MeetingDetail) -> String {
 fn sanitize_filename(name: &str) -> String {
     let cleaned: String = name
         .chars()
+        .take(200) // keep room for the ".md" suffix under the 255-byte filename limit
         .map(|c| {
             if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
                 c
