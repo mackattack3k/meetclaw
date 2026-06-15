@@ -71,8 +71,14 @@ enum Capture {
 fn syscap_path() -> String {
     format!("{}/binaries/meetclaw-syscap", env!("CARGO_MANIFEST_DIR"))
 }
-// How often (at most) to ask Claude for fresh question suggestions.
-const ANALYSIS_INTERVAL_SECONDS: u64 = 20;
+// Analysis cadence. Suggestions fire when EITHER the timer elapses (so a slow,
+// sparse conversation still gets refreshed) OR enough new transcript segments
+// have accumulated (so dense back-and-forth gets suggestions sooner) — but never
+// closer together than the minimum-gap floor, which keeps a rapid burst of short
+// segments from spamming the API.
+const ANALYSIS_INTERVAL_SECONDS: u64 = 20; // time fallback / max gap
+const ANALYSIS_SEGMENT_THRESHOLD: usize = 4; // new segments that trigger early
+const ANALYSIS_MIN_GAP_SECONDS: u64 = 8; // never fire more often than this
 // How much recent transcript (in characters) to send as context.
 const MAX_CONTEXT_CHARS: usize = 4000;
 
@@ -595,6 +601,7 @@ fn run_pipeline(
     }
     let mut transcript_history: Vec<String> = Vec::new();
     let mut last_analysis = Instant::now();
+    let mut segments_since_analysis: usize = 0;
     let mut last_lang: Option<String> = None;
     let mut last_emitted: Option<String> = None;
     // Auto-detect hysteresis state (only used when language = "auto").
@@ -686,14 +693,22 @@ fn run_pipeline(
                 }
                 last_emitted = Some(text.clone());
                 transcript_history.push(text.clone());
+                segments_since_analysis += 1;
                 let _ = meeting::append_transcript(&dir, &text);
                 let _ = app.emit("transcript", TranscriptPayload { text });
 
-                // Periodically ask Gemini for question suggestions. Run the
-                // call on its own thread so transcription keeps flowing.
+                // Ask Gemini for question suggestions when the timer is due, or
+                // early once enough new segments have piled up — but never sooner
+                // than the minimum-gap floor (the timer fallback is always past
+                // the floor, so only the segment path is gated by it).
                 if let Some(key) = &api_key {
-                    if last_analysis.elapsed() >= Duration::from_secs(ANALYSIS_INTERVAL_SECONDS) {
+                    let elapsed = last_analysis.elapsed();
+                    let timer_due = elapsed >= Duration::from_secs(ANALYSIS_INTERVAL_SECONDS);
+                    let segments_due = segments_since_analysis >= ANALYSIS_SEGMENT_THRESHOLD
+                        && elapsed >= Duration::from_secs(ANALYSIS_MIN_GAP_SECONDS);
+                    if timer_due || segments_due {
                         last_analysis = Instant::now();
+                        segments_since_analysis = 0;
                         let context = recent_context(&transcript_history, MAX_CONTEXT_CHARS);
                         let key = key.clone();
                         let selected_model = model
