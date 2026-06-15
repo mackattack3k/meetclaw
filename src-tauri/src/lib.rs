@@ -98,8 +98,47 @@ struct AppState {
     language: Arc<Mutex<String>>,
     // Audio source ("mic" or "system").
     audio_source: Arc<Mutex<String>>,
-    // Whether to capture camera frames (~1 Hz) while recording.
+    // Whether camera capture (~1 Hz) is enabled.
     camera: Arc<AtomicBool>,
+    // The running camera helper, when capture is active.
+    camera_capture: Arc<Mutex<Option<camera::CameraCapture>>>,
+}
+
+/// Where the latest camera frame is written (app cache); the preview reads it.
+fn preview_frame_path(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_cache_dir()
+        .map(|d| d.join("camera-frame.jpg"))
+        .unwrap_or_else(|_| PathBuf::from("camera-frame.jpg"))
+}
+
+/// Start the camera helper (writing to the preview frame path) and hold it in
+/// state. No-op if it's already running. Errors surface as a `camera-status`.
+fn start_camera(app: &AppHandle, state: &AppState) {
+    if state.camera_capture.lock().map(|g| g.is_some()).unwrap_or(false) {
+        return;
+    }
+    let path = preview_frame_path(app);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match camera::CameraCapture::start(&camera_path(), path, app.clone()) {
+        Ok(cap) => {
+            if let Ok(mut guard) = state.camera_capture.lock() {
+                *guard = Some(cap);
+            }
+        }
+        Err(e) => {
+            let _ = app.emit("camera-status", format!("Camera unavailable: {e}"));
+        }
+    }
+}
+
+/// Stop the camera helper (dropping the guard kills the process).
+fn stop_camera(state: &AppState) {
+    if let Ok(mut guard) = state.camera_capture.lock() {
+        *guard = None;
+    }
 }
 
 /// The meeting currently being recorded into / edited.
@@ -164,23 +203,14 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         .lock()
         .map(|s| s.clone())
         .unwrap_or_else(|_| DEFAULT_AUDIO_SOURCE.to_string());
-    let camera_on = state.camera.load(Ordering::SeqCst);
+    // Ensure capture is running if the camera is enabled (covers a persisted-on
+    // toggle not re-clicked this session). Capture is independent of recording,
+    // so it isn't stopped when recording ends.
+    if state.camera.load(Ordering::SeqCst) {
+        start_camera(&app, &state);
+    }
 
     std::thread::spawn(move || {
-        // Capture camera frames alongside audio when enabled; the guard stops the
-        // helper as soon as recording ends.
-        let camera = if camera_on {
-            match camera::CameraCapture::start(&camera_path(), dir.clone(), app.clone()) {
-                Ok(c) => Some(c),
-                Err(e) => {
-                    let _ = app.emit("camera-status", format!("Camera unavailable: {e}"));
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
         let outcome = match run_pipeline(
             &app,
             running.clone(),
@@ -197,7 +227,6 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
                 PipelineOutcome::default()
             }
         };
-        drop(camera); // stop the camera the moment recording stops
         running.store(false, Ordering::SeqCst);
         // Write the WAV from the accumulated PCM now that recording has stopped.
         let _ = meeting::finalize_wav(&dir);
@@ -432,18 +461,19 @@ fn set_audio_source(app: AppHandle, source: String, state: State<AppState>) {
 fn set_camera(app: AppHandle, enabled: bool, state: State<AppState>) {
     state.camera.store(enabled, Ordering::SeqCst);
     let _ = settings::update(&app, |s| s.camera = Some(enabled));
+    // Start/stop capture immediately so the preview works without recording.
+    if enabled {
+        start_camera(&app, &state);
+    } else {
+        stop_camera(&state);
+    }
 }
 
-/// Read the current meeting's latest camera frame (JPEG) for the live preview.
+/// Read the latest camera frame (JPEG) for the live preview.
 #[tauri::command]
-fn read_current_frame(state: State<AppState>) -> Result<tauri::ipc::Response, String> {
-    let dir = state
-        .meeting
-        .lock()
-        .ok()
-        .and_then(|g| g.as_ref().map(|m| m.dir.clone()))
-        .ok_or_else(|| "no active meeting".to_string())?;
-    let bytes = std::fs::read(dir.join("frame.jpg")).map_err(|e| format!("no frame: {e}"))?;
+fn read_current_frame(app: AppHandle) -> Result<tauri::ipc::Response, String> {
+    let bytes =
+        std::fs::read(preview_frame_path(&app)).map_err(|e| format!("no frame: {e}"))?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -998,6 +1028,7 @@ pub fn run() {
                         .unwrap_or_else(|| DEFAULT_AUDIO_SOURCE.to_string()),
                 )),
                 camera: Arc::new(AtomicBool::new(saved.camera.unwrap_or(false))),
+                camera_capture: Arc::new(Mutex::new(None)),
             });
 
             // Native macOS menu: Settings… bound to Cmd+, under the app menu,

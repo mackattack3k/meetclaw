@@ -1,8 +1,9 @@
 // Camera capture: spawns the AVFoundation helper binary and reads its
 // length-prefixed JPEG frames (4-byte little-endian length, then the bytes) from
-// stdout at ~1 Hz. The latest frame is written to `<meeting>/frame.jpg` for the
-// vision pipeline to pick up, and a `camera-frame` event tells the UI to refresh
-// its preview. Requires the Camera permission.
+// stdout at ~1 Hz. The latest frame is written to `frame_path` (overwritten each
+// tick) for the vision pipeline and the live preview to pick up, and a
+// `camera-frame` event tells the UI to refresh. Capture runs whenever the camera
+// is enabled, independent of recording. Requires the Camera permission.
 
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
@@ -18,7 +19,7 @@ pub struct CameraCapture {
 }
 
 impl CameraCapture {
-    pub fn start(helper_path: &str, dir: PathBuf, app: AppHandle) -> Result<Self, String> {
+    pub fn start(helper_path: &str, frame_path: PathBuf, app: AppHandle) -> Result<Self, String> {
         let mut child = Command::new(helper_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -49,8 +50,8 @@ impl CameraCapture {
                 }
                 // Write to a temp file then rename so a reader never sees a
                 // half-written frame.
-                let tmp = dir.join("frame.tmp.jpg");
-                if std::fs::write(&tmp, &jpeg).is_ok() && std::fs::rename(&tmp, dir.join("frame.jpg")).is_ok() {
+                let tmp = frame_path.with_extension("tmp");
+                if std::fs::write(&tmp, &jpeg).is_ok() && std::fs::rename(&tmp, &frame_path).is_ok() {
                     let _ = frame_app.emit("camera-frame", ());
                 }
             }

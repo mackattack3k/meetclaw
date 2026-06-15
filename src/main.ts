@@ -84,7 +84,6 @@ function setListening(on: boolean) {
   toggleBtn.classList.toggle("recording", on);
   statusDot.classList.toggle("live", on);
   showMeter(on);
-  if (!on) hideCameraPreview();
   statusText.textContent = on
     ? "Listening — transcribing on pauses."
     : "Stopped.";
