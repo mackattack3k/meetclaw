@@ -25,7 +25,10 @@ keyring = { version = "3", features = ["apple-native"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 cpal = "0.15"
-whisper-rs = "0.14"
+# `metal` enables GPU inference via whisper.cpp's Metal backend (macOS-only,
+# matching the rest of the app). GPU use is on by default in
+# WhisperContextParameters, so the feature flag is the whole change.
+whisper-rs = { version = "0.14", features = ["metal"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 dotenvy = "0.15"
 hound = "3"
