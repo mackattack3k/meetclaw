@@ -21,7 +21,7 @@ const newBtn = document.querySelector<HTMLButtonElement>("#new-btn")!;
 const libraryEl = document.querySelector<HTMLElement>("#library")!;
 const libraryListEl = document.querySelector<HTMLElement>("#library-list")!;
 const libraryCloseEl = document.querySelector<HTMLButtonElement>("#library-close")!;
-const settingsBtn = document.querySelector<HTMLButtonElement>("#settings-btn")!;
+const themeBtn = document.querySelector<HTMLButtonElement>("#theme-btn")!;
 const langSelect = document.querySelector<HTMLSelectElement>("#lang-select")!;
 const detectedLangEl = document.querySelector<HTMLSpanElement>("#detected-lang")!;
 const sourceSeg = document.querySelector<HTMLElement>("#source-seg")!;
@@ -30,12 +30,17 @@ const playBtn = document.querySelector<HTMLButtonElement>("#play-btn")!;
 const seekEl = document.querySelector<HTMLInputElement>("#seek")!;
 const timeEl = document.querySelector<HTMLSpanElement>("#time")!;
 const audioEl = document.querySelector<HTMLAudioElement>("#audio")!;
-const meterEl = document.querySelector<HTMLElement>("#meter")!;
 const meterCanvas = document.querySelector<HTMLCanvasElement>("#meter-canvas")!;
 const meterDbEl = document.querySelector<HTMLSpanElement>("#meter-db")!;
 const cameraBtn = document.querySelector<HTMLButtonElement>("#camera-btn")!;
 const cameraPreview = document.querySelector<HTMLElement>("#camera-preview")!;
 const cameraImg = document.querySelector<HTMLImageElement>("#camera-img")!;
+const recPill = document.querySelector<HTMLElement>("#rec-pill")!;
+const recTimeEl = document.querySelector<HTMLSpanElement>("#rec-time")!;
+const camLiveEl = document.querySelector<HTMLElement>("#cam-live")!;
+const transcriptLiveEl = document.querySelector<HTMLElement>("#transcript-live")!;
+const savedStatus = document.querySelector<HTMLElement>("#saved-status")!;
+const savedText = document.querySelector<HTMLSpanElement>("#saved-text")!;
 
 type SettingsView = {
   model: string;
@@ -80,13 +85,83 @@ function updateNewButton() {
 
 function setListening(on: boolean) {
   listening = on;
-  toggleBtn.textContent = on ? "Stop" : "Start";
+  const label = on ? "Stop recording" : "Start recording";
+  toggleBtn.setAttribute("aria-label", label);
+  toggleBtn.title = label;
   toggleBtn.classList.toggle("recording", on);
   statusDot.classList.toggle("live", on);
+  recPill.classList.toggle("hidden", !on);
+  camLiveEl.classList.toggle("hidden", !(on && cameraOn));
+  transcriptLiveEl.classList.toggle("hidden", !on);
   showMeter(on);
-  statusText.textContent = on
-    ? "Listening — transcribing on pauses."
-    : "Stopped.";
+  if (on) startRecTimer();
+  else stopRecTimer();
+  statusText.textContent = on ? captureSummary() : "Stopped.";
+}
+
+// "● REC m:ss" elapsed-time pill, ticked once a second while recording.
+let recTimer: number | undefined;
+let recStart = 0;
+function fmtClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+function startRecTimer() {
+  recStart = Date.now();
+  recTimeEl.textContent = "0:00";
+  window.clearInterval(recTimer);
+  recTimer = window.setInterval(() => {
+    recTimeEl.textContent = fmtClock(Date.now() - recStart);
+  }, 1000);
+}
+function stopRecTimer() {
+  window.clearInterval(recTimer);
+  recTimer = undefined;
+}
+
+// One-line summary of what's being captured, shown in the status line while live.
+function captureSummary(): string {
+  const src =
+    currentSource === "both"
+      ? "both mic and system audio"
+      : currentSource === "system"
+        ? "system audio"
+        : "mic audio";
+  const opt = langSelect.selectedOptions[0];
+  const lang = opt ? opt.textContent ?? "" : "";
+  return `Capturing ${src}${lang ? ` · ${lang}` : ""}`;
+}
+
+// "Saved <when>" stamp in the notes header. Updated whenever the frontend
+// successfully persists user content (notes / title), on meeting load, and
+// after the transcript is finalized. The relative time refreshes on a timer.
+let lastSavedMs = 0;
+let savedTimer: number | undefined;
+function relTime(ms: number): string {
+  const s = Math.floor((Date.now() - ms) / 1000);
+  if (s < 10) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  return `${Math.floor(m / 60)}h ago`;
+}
+function renderSaved() {
+  if (lastSavedMs) savedText.textContent = `Saved ${relTime(lastSavedMs)}`;
+}
+function markSaved() {
+  lastSavedMs = Date.now();
+  savedStatus.classList.remove("hidden");
+  renderSaved();
+  window.clearInterval(savedTimer);
+  savedTimer = window.setInterval(renderSaved, 15000);
+}
+function clearSaved() {
+  lastSavedMs = 0;
+  window.clearInterval(savedTimer);
+  savedTimer = undefined;
+  savedStatus.classList.add("hidden");
 }
 
 function appendTranscript(text: string) {
@@ -168,7 +243,9 @@ langSelect.addEventListener("change", () => {
 
 // Segmented audio-source control (Mic / System / Both).
 const segButtons = Array.from(sourceSeg.querySelectorAll<HTMLButtonElement>(".seg"));
+let currentSource = "mic";
 function setSourceActive(value: string) {
+  currentSource = value;
   for (const b of segButtons) b.classList.toggle("active", b.dataset.source === value);
 }
 for (const b of segButtons) {
@@ -188,6 +265,7 @@ function setCameraActive(on: boolean) {
   cameraBtn.classList.toggle("active", on);
   cameraBtn.setAttribute("aria-pressed", String(on));
   cameraBtn.textContent = on ? "On" : "Off";
+  camLiveEl.classList.toggle("hidden", !(listening && on));
   if (!on) hideCameraPreview();
 }
 cameraBtn.addEventListener("click", async () => {
@@ -241,14 +319,19 @@ async function refreshSettings() {
   }
 }
 
-// Open (or focus) the detached native settings window. Rust does the same on
-// the Cmd+, menu item, so both entry points share one code path.
-function openSettings() {
-  invoke("open_settings").catch((err) => {
-    statusText.textContent = `Error opening settings: ${err}`;
-  });
+// Light / dark theme toggle. Settings live in the detached native window,
+// reachable via the Cmd+, menu item (handled in Rust).
+const THEME_KEY = "meetclaw-theme";
+function applyTheme(theme: "light" | "dark") {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem(THEME_KEY, theme);
 }
-settingsBtn.addEventListener("click", openSettings);
+applyTheme(localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light");
+themeBtn.addEventListener("click", () => {
+  const next =
+    document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  applyTheme(next);
+});
 
 // Esc closes the library overlay.
 window.addEventListener("keydown", (e) => {
@@ -269,9 +352,11 @@ notesEl.addEventListener("input", () => {
   updateNewButton();
   window.clearTimeout(notesTimer);
   notesTimer = window.setTimeout(() => {
-    invoke("set_notes", { notes: notesEl.value }).catch((err) => {
-      statusText.textContent = `Error saving notes: ${err}`;
-    });
+    invoke("set_notes", { notes: notesEl.value })
+      .then(markSaved)
+      .catch((err) => {
+        statusText.textContent = `Error saving notes: ${err}`;
+      });
   }, 400);
 });
 
@@ -280,7 +365,7 @@ notesEl.addEventListener("input", () => {
 // debounce. The backend also flushes notes on exit as a final backstop.
 function flushNotes() {
   window.clearTimeout(notesTimer);
-  invoke("set_notes", { notes: notesEl.value }).catch(() => {});
+  invoke("set_notes", { notes: notesEl.value }).then(markSaved).catch(() => {});
 }
 window.addEventListener("blur", flushNotes);
 document.addEventListener("visibilitychange", () => {
@@ -294,9 +379,11 @@ titleInput.addEventListener("input", () => {
   updateNewButton();
   window.clearTimeout(titleTimer);
   titleTimer = window.setTimeout(() => {
-    invoke("set_title", { title: titleInput.value }).catch((err) => {
-      statusText.textContent = `Error saving title: ${err}`;
-    });
+    invoke("set_title", { title: titleInput.value })
+      .then(markSaved)
+      .catch((err) => {
+        statusText.textContent = `Error saving title: ${err}`;
+      });
   }, 400);
 });
 
@@ -306,6 +393,7 @@ function resetPanes() {
   transcriptEl.replaceChildren(makePlaceholder("Transcript will appear here…"));
   noteInSuggestions("Questions will appear here…");
   clearPlayer();
+  clearSaved();
   updateNewButton();
 }
 
@@ -495,6 +583,7 @@ async function openMeeting(id: string) {
     }
 
     void loadAudio(id);
+    clearSaved();
     updateNewButton();
     hideLibrary();
     statusText.textContent = "Loaded meeting. Press play to listen, or start to keep recording.";
@@ -569,13 +658,11 @@ function pushMeterLevel(db: number) {
   meterDbEl.classList.toggle("quiet", db < METER_QUIET_DB);
 }
 
-function showMeter(on: boolean) {
-  meterEl.classList.toggle("hidden", !on);
-  if (!on) return;
+// The meter card is always on screen; this just resets it between sessions.
+function showMeter(_on: boolean) {
   meterData = [];
   meterDbEl.textContent = "—";
   meterDbEl.classList.remove("quiet");
-  // Defer sizing until the element is visible and laid out.
   requestAnimationFrame(() => {
     sizeMeterCanvas();
     drawMeter();
@@ -661,6 +748,7 @@ listen<string>("transcript-finalized", (event) => {
     for (const s of sentences) appendTranscript(s);
   }
   updateNewButton();
+  markSaved();
   statusText.textContent = "Transcript refined.";
 });
 
