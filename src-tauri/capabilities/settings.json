@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "Settings window only: allow it to close itself (Esc).",
+  "windows": ["settings"],
+  "permissions": [
+    "core:window:allow-close"
+  ]
+}

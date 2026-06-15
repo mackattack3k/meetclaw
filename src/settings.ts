@@ -56,11 +56,13 @@ resetDirBtn.addEventListener("click", async () => {
 });
 
 saveKeyBtn.addEventListener("click", async () => {
+  // An empty/whitespace key clears the stored credential rather than saving one.
+  const cleared = apiKeyEl.value.trim() === "";
   try {
     await invoke("set_api_key", { key: apiKeyEl.value });
     apiKeyEl.value = "";
     await refresh();
-    statusEl.textContent = "Key saved.";
+    statusEl.textContent = cleared ? "Key cleared." : "Key saved.";
   } catch (err) {
     statusEl.textContent = `Error saving key: ${err}`;
   }

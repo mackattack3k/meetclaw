@@ -387,22 +387,23 @@ fn set_notes(app: AppHandle, notes: String, state: State<AppState>) -> Result<()
 /// Open the detached settings window, or focus it if it's already open.
 /// Shared by the gear button (via the `open_settings` command) and the Cmd+,
 /// menu item.
-fn open_settings_window(app: &AppHandle) {
+fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
     if let Some(win) = app.get_webview_window("settings") {
-        let _ = win.set_focus();
-        return;
+        win.set_focus()?;
+        return Ok(());
     }
-    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+    WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Settings")
         .inner_size(480.0, 340.0)
         .min_inner_size(380.0, 260.0)
         .resizable(true)
-        .build();
+        .build()?;
+    Ok(())
 }
 
 #[tauri::command]
-fn open_settings(app: AppHandle) {
-    open_settings_window(&app);
+fn open_settings(app: AppHandle) -> Result<(), String> {
+    open_settings_window(&app).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -847,7 +848,10 @@ pub fn run() {
         .on_menu_event(|app, event| {
             let id: &str = event.id.as_ref();
             if id == "settings" {
-                open_settings_window(app);
+                // The menu closure can't return a Result, so log on failure.
+                if let Err(e) = open_settings_window(app) {
+                    eprintln!("failed to open settings window: {e}");
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
