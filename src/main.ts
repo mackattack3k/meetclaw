@@ -401,9 +401,12 @@ function renderLibrary(meetings: MeetingMeta[]) {
     exportBtn.textContent = "Export";
     exportBtn.addEventListener("click", async () => {
       try {
+        // Keep path separators / reserved characters out of the suggested name
+        // (the backend sanitizes the file inside the zip regardless).
+        const safeTitle = m.title.replace(/[\\/:*?"<>|]/g, "_").trim() || "meeting";
         const dest = await save({
           title: "Export meeting",
-          defaultPath: `${m.title}.zip`,
+          defaultPath: `${safeTitle}.zip`,
           filters: [{ name: "Zip archive", extensions: ["zip"] }],
         });
         if (!dest) return;
