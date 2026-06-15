@@ -11,6 +11,14 @@ use tauri::{AppHandle, Emitter};
 
 pub const SAMPLE_RATE: u32 = 48_000;
 
+// ScreenCaptureKit delivers system audio at a low level (peaks ~0.05-0.08), so
+// the saved WAV is too quiet to play back comfortably. Lift it at the capture
+// stage with a fixed gain, clamped to avoid wraparound on louder moments. This
+// only touches system audio — in "both" mode the mic is mixed in separately at
+// its own (already healthy) level. Transcription normalizes independently, so
+// this is purely about playback loudness.
+const SYSTEM_GAIN: f32 = 6.0;
+
 pub struct SystemAudioCapture {
     child: Child,
 }
@@ -49,6 +57,7 @@ impl SystemAudioCapture {
                             let samples: Vec<f32> = acc[..whole]
                                 .chunks_exact(4)
                                 .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                                .map(|s| (s * SYSTEM_GAIN).clamp(-1.0, 1.0))
                                 .collect();
                             acc.drain(..whole);
                             if tx.send(samples).is_err() {
