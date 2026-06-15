@@ -1,3 +1,4 @@
+mod agent;
 mod analyze;
 mod audio;
 mod camera;
@@ -102,6 +103,10 @@ struct AppState {
     camera: Arc<AtomicBool>,
     // The running camera helper, when capture is active.
     camera_capture: Arc<Mutex<Option<camera::CameraCapture>>>,
+    // Agent: the active run (if any), persisted allow-rules, and auto mode.
+    agent_handle: Arc<Mutex<Option<agent::AgentHandle>>>,
+    agent_rules: Arc<Mutex<Vec<String>>>,
+    agent_auto: Arc<AtomicBool>,
 }
 
 /// Where the latest camera frame is written (app cache); the preview reads it.
@@ -570,8 +575,8 @@ fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
     }
     WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Settings")
-        .inner_size(480.0, 340.0)
-        .min_inner_size(380.0, 260.0)
+        .inner_size(520.0, 660.0)
+        .min_inner_size(420.0, 420.0)
         .resizable(true)
         .build()?;
     Ok(())
@@ -643,6 +648,167 @@ fn delete_meeting(app: AppHandle, id: String, state: State<AppState>) -> Result<
         }
     }
     Ok(())
+}
+
+// --- Agent (issue #34) ---
+
+/// Start an agent run from a manual request. Replaces any in-flight run.
+#[tauri::command]
+fn agent_ask(app: AppHandle, text: String, state: State<AppState>) -> Result<(), String> {
+    let api_key = analyze::api_key().ok_or("No Gemini API key set (Settings).")?;
+    let model = state
+        .model
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    let notes = state.notes.lock().map(|n| n.clone()).unwrap_or_default();
+    let transcript = state
+        .meeting
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|m| meeting::read_transcript(&m.dir)))
+        .unwrap_or_default();
+    let agent_md = settings::read_agent_config(&app);
+    let workspace = settings::agent_workspace(&app)?;
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel();
+    {
+        let mut handle = state
+            .agent_handle
+            .lock()
+            .map_err(|_| "agent lock poisoned".to_string())?;
+        if let Some(prev) = handle.take() {
+            prev.stop.store(true, Ordering::SeqCst); // cancel any prior run
+        }
+        *handle = Some(agent::AgentHandle {
+            decision_tx: tx,
+            stop: stop.clone(),
+        });
+    }
+
+    let args = agent::RunArgs {
+        api_key,
+        model,
+        ask: text,
+        transcript,
+        notes,
+        agent_md,
+        workspace,
+        rules: state.agent_rules.clone(),
+        auto: state.agent_auto.clone(),
+    };
+    let app_for_agent = app.clone();
+    std::thread::spawn(move || agent::run_agent(app_for_agent, args, rx, stop));
+    Ok(())
+}
+
+/// Forward the user's verdict on a pending proposal. `decision` is one of
+/// "allow_once" | "allow_always" | "deny"; for "allow_always", `scope` is the
+/// allow-rule to persist (e.g. "web_search" or "run_command:gh").
+#[tauri::command]
+fn agent_decision(
+    app: AppHandle,
+    decision: String,
+    scope: Option<String>,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let verdict = match decision.as_str() {
+        "allow_once" => agent::Decision::AllowOnce,
+        "allow_always" => {
+            if let Some(rule) = scope.filter(|s| !s.trim().is_empty()) {
+                add_allow_rule(&app, &state, rule)?;
+            }
+            agent::Decision::AllowAlways
+        }
+        "deny" => agent::Decision::Deny,
+        other => return Err(format!("unknown decision: {other}")),
+    };
+    let handle = state
+        .agent_handle
+        .lock()
+        .map_err(|_| "agent lock poisoned".to_string())?;
+    if let Some(h) = handle.as_ref() {
+        h.decision_tx
+            .send(verdict)
+            .map_err(|_| "agent run already ended".to_string())?;
+    }
+    Ok(())
+}
+
+/// Append an allow-rule to the live set and persist it.
+fn add_allow_rule(app: &AppHandle, state: &State<AppState>, rule: String) -> Result<(), String> {
+    if let Ok(mut rules) = state.agent_rules.lock() {
+        if !rules.contains(&rule) {
+            rules.push(rule);
+        }
+        let snapshot = rules.clone();
+        settings::update(app, |s| s.agent_allow_rules = Some(snapshot))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn agent_stop(state: State<AppState>) -> Result<(), String> {
+    if let Ok(handle) = state.agent_handle.lock() {
+        if let Some(h) = handle.as_ref() {
+            h.stop.store(true, Ordering::SeqCst);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn agent_set_auto(app: AppHandle, enabled: bool, state: State<AppState>) -> Result<(), String> {
+    state.agent_auto.store(enabled, Ordering::SeqCst);
+    settings::update(&app, |s| s.agent_auto = Some(enabled))
+}
+
+#[tauri::command]
+fn get_agent_settings(app: AppHandle, state: State<AppState>) -> AgentSettingsView {
+    AgentSettingsView {
+        config: settings::read_agent_config(&app),
+        allow_rules: state
+            .agent_rules
+            .lock()
+            .map(|r| r.clone())
+            .unwrap_or_default(),
+        auto: state.agent_auto.load(Ordering::SeqCst),
+        workspace: settings::agent_workspace(&app)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    }
+}
+
+#[tauri::command]
+fn set_agent_config(app: AppHandle, content: String) -> Result<(), String> {
+    settings::write_agent_config(&app, &content)
+}
+
+#[tauri::command]
+fn set_allow_rules(
+    app: AppHandle,
+    rules: Vec<String>,
+    state: State<AppState>,
+) -> Result<(), String> {
+    if let Ok(mut current) = state.agent_rules.lock() {
+        *current = rules.clone();
+    }
+    settings::update(&app, |s| s.agent_allow_rules = Some(rules))
+}
+
+/// Set (or clear, with `None`) the directory the agent runs commands in.
+#[tauri::command]
+fn set_agent_workspace(app: AppHandle, path: Option<String>) -> Result<(), String> {
+    settings::update(&app, |s| s.agent_workspace = path.filter(|p| !p.trim().is_empty()))
+}
+
+#[derive(Serialize)]
+struct AgentSettingsView {
+    config: String,
+    allow_rules: Vec<String>,
+    auto: bool,
+    workspace: String,
 }
 
 // Multilingual base model (supports auto-detect + ~99 languages).
@@ -1036,6 +1202,9 @@ pub fn run() {
                 )),
                 camera: Arc::new(AtomicBool::new(saved.camera.unwrap_or(false))),
                 camera_capture: Arc::new(Mutex::new(None)),
+                agent_handle: Arc::new(Mutex::new(None)),
+                agent_rules: Arc::new(Mutex::new(settings::agent_allow_rules(app.handle()))),
+                agent_auto: Arc::new(AtomicBool::new(saved.agent_auto.unwrap_or(false))),
             });
 
             // Native macOS menu: Settings… bound to Cmd+, under the app menu,
@@ -1108,7 +1277,15 @@ pub fn run() {
             set_language,
             set_audio_source,
             set_camera,
-            read_current_frame
+            read_current_frame,
+            agent_ask,
+            agent_decision,
+            agent_stop,
+            agent_set_auto,
+            get_agent_settings,
+            set_agent_config,
+            set_allow_rules,
+            set_agent_workspace
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

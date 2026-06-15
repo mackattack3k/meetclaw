@@ -15,6 +15,13 @@ type SettingsView = {
   has_api_key: boolean;
 };
 
+type AgentSettings = {
+  config: string;
+  allow_rules: string[];
+  auto: boolean;
+  workspace: string;
+};
+
 const saveDirEl = document.querySelector<HTMLSpanElement>("#save-dir")!;
 const chooseDirBtn = document.querySelector<HTMLButtonElement>("#choose-dir")!;
 const resetDirBtn = document.querySelector<HTMLButtonElement>("#reset-dir")!;
@@ -22,6 +29,13 @@ const apiKeyEl = document.querySelector<HTMLInputElement>("#api-key")!;
 const saveKeyBtn = document.querySelector<HTMLButtonElement>("#save-key")!;
 const keyStatusEl = document.querySelector<HTMLSpanElement>("#key-status")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#settings-status")!;
+const configEl = document.querySelector<HTMLTextAreaElement>("#agent-config")!;
+const saveConfigBtn = document.querySelector<HTMLButtonElement>("#save-config")!;
+const rulesEl = document.querySelector<HTMLTextAreaElement>("#allow-rules")!;
+const saveRulesBtn = document.querySelector<HTMLButtonElement>("#save-rules")!;
+const workspaceEl = document.querySelector<HTMLSpanElement>("#agent-workspace")!;
+const chooseWorkspaceBtn = document.querySelector<HTMLButtonElement>("#choose-workspace")!;
+const resetWorkspaceBtn = document.querySelector<HTMLButtonElement>("#reset-workspace")!;
 
 async function refresh() {
   try {
@@ -33,6 +47,61 @@ async function refresh() {
     statusEl.textContent = `Error loading settings: ${err}`;
   }
 }
+
+async function refreshAgent() {
+  try {
+    const a = await invoke<AgentSettings>("get_agent_settings");
+    configEl.value = a.config;
+    rulesEl.value = a.allow_rules.join("\n");
+    workspaceEl.textContent = a.workspace || "—";
+  } catch (err) {
+    statusEl.textContent = `Error loading agent settings: ${err}`;
+  }
+}
+
+saveConfigBtn.addEventListener("click", async () => {
+  try {
+    await invoke("set_agent_config", { content: configEl.value });
+    statusEl.textContent = "Instructions saved.";
+  } catch (err) {
+    statusEl.textContent = `Error saving instructions: ${err}`;
+  }
+});
+
+saveRulesBtn.addEventListener("click", async () => {
+  const rules = rulesEl.value
+    .split("\n")
+    .map((r) => r.trim())
+    .filter((r) => r.length > 0);
+  try {
+    await invoke("set_allow_rules", { rules });
+    await refreshAgent();
+    statusEl.textContent = "Allow-rules saved.";
+  } catch (err) {
+    statusEl.textContent = `Error saving rules: ${err}`;
+  }
+});
+
+chooseWorkspaceBtn.addEventListener("click", async () => {
+  try {
+    const picked = await open({ directory: true, multiple: false });
+    if (typeof picked === "string") {
+      await invoke("set_agent_workspace", { path: picked });
+      await refreshAgent();
+    }
+  } catch (err) {
+    statusEl.textContent = `Error choosing workspace: ${err}`;
+  }
+});
+
+resetWorkspaceBtn.addEventListener("click", async () => {
+  try {
+    await invoke("set_agent_workspace", { path: null });
+    await refreshAgent();
+  } catch (err) {
+    statusEl.textContent = `Error resetting workspace: ${err}`;
+  }
+});
 
 chooseDirBtn.addEventListener("click", async () => {
   try {
@@ -74,3 +143,4 @@ window.addEventListener("keydown", (e) => {
 });
 
 refresh();
+refreshAgent();
