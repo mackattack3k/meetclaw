@@ -190,12 +190,15 @@ function setCameraActive(on: boolean) {
   cameraBtn.textContent = on ? "On" : "Off";
   if (!on) hideCameraPreview();
 }
-cameraBtn.addEventListener("click", () => {
+cameraBtn.addEventListener("click", async () => {
   const next = !cameraOn;
   setCameraActive(next);
-  invoke("set_camera", { enabled: next }).catch((err) => {
+  try {
+    await invoke("set_camera", { enabled: next });
+  } catch (err) {
+    setCameraActive(!next); // revert the toggle if the backend rejected it
     statusText.textContent = `Error setting camera: ${err}`;
-  });
+  }
 });
 
 let cameraFrameUrl: string | null = null;
@@ -629,8 +632,10 @@ listen<string>("camera-status", (event) => {
   statusText.textContent = event.payload;
 });
 
-// A new camera frame was written — pull it and refresh the preview.
+// A new camera frame was written — pull it and refresh the preview. Ignore any
+// in-flight event that lands after the camera was switched off.
 listen("camera-frame", async () => {
+  if (!cameraOn) return;
   try {
     const buf = await invoke<ArrayBuffer>("read_current_frame");
     const next = URL.createObjectURL(new Blob([buf], { type: "image/jpeg" }));

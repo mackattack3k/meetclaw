@@ -105,32 +105,40 @@ struct AppState {
 }
 
 /// Where the latest camera frame is written (app cache); the preview reads it.
-fn preview_frame_path(app: &AppHandle) -> PathBuf {
+fn preview_frame_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_cache_dir()
         .map(|d| d.join("camera-frame.jpg"))
-        .unwrap_or_else(|_| PathBuf::from("camera-frame.jpg"))
+        .map_err(|e| format!("no cache dir: {e}"))
 }
 
 /// Start the camera helper (writing to the preview frame path) and hold it in
 /// state. No-op if it's already running. Errors surface as a `camera-status`.
 fn start_camera(app: &AppHandle, state: &AppState) {
-    if state.camera_capture.lock().map(|g| g.is_some()).unwrap_or(false) {
+    // Hold the lock across the whole start so two racing callers (rapid toggles,
+    // or set_camera vs. start_listening) can't both spawn a helper.
+    let mut guard = match state.camera_capture.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    if guard.is_some() {
         return;
     }
-    let path = preview_frame_path(app);
+    let report = |e: String| {
+        let _ = app.emit("camera-status", format!("Camera unavailable: {e}"));
+    };
+    let path = match preview_frame_path(app) {
+        Ok(p) => p,
+        Err(e) => return report(e),
+    };
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return report(format!("create cache dir: {e}"));
+        }
     }
     match camera::CameraCapture::start(&camera_path(), path, app.clone()) {
-        Ok(cap) => {
-            if let Ok(mut guard) = state.camera_capture.lock() {
-                *guard = Some(cap);
-            }
-        }
-        Err(e) => {
-            let _ = app.emit("camera-status", format!("Camera unavailable: {e}"));
-        }
+        Ok(cap) => *guard = Some(cap),
+        Err(e) => report(e),
     }
 }
 
@@ -472,8 +480,7 @@ fn set_camera(app: AppHandle, enabled: bool, state: State<AppState>) {
 /// Read the latest camera frame (JPEG) for the live preview.
 #[tauri::command]
 fn read_current_frame(app: AppHandle) -> Result<tauri::ipc::Response, String> {
-    let bytes =
-        std::fs::read(preview_frame_path(&app)).map_err(|e| format!("no frame: {e}"))?;
+    let bytes = std::fs::read(preview_frame_path(&app)?).map_err(|e| format!("no frame: {e}"))?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
