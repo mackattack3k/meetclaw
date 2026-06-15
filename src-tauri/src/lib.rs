@@ -368,16 +368,20 @@ fn set_api_key(key: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_notes(notes: String, state: State<AppState>) {
+fn set_notes(app: AppHandle, notes: String, state: State<AppState>) -> Result<(), String> {
     if let Ok(mut current) = state.notes.lock() {
         *current = notes.clone();
     }
-    // Persist to the current meeting, if one exists.
-    if let Ok(guard) = state.meeting.lock() {
-        if let Some(current) = guard.as_ref() {
-            let _ = meeting::write_notes(&current.dir, &notes);
-        }
+    // Don't spin up a meeting folder just to store empty notes (e.g. the user
+    // typed then cleared the pane before anything else exists).
+    let has_meeting = state.meeting.lock().map(|g| g.is_some()).unwrap_or(false);
+    if notes.is_empty() && !has_meeting {
+        return Ok(());
     }
+    // Ensure a meeting exists so notes are always written to disk and survive a
+    // restart — mirrors set_title, which already does this.
+    let current = ensure_meeting(&app, &state)?;
+    meeting::write_notes(&current.dir, &notes)
 }
 
 #[tauri::command]
