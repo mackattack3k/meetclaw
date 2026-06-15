@@ -24,6 +24,12 @@
         <button id="toggle-btn" class="btn btn-primary">Start</button>
       </header>
 
+      <div id="meter" class="meter hidden" title="Live microphone input level">
+        <span class="meter-label">IN</span>
+        <canvas id="meter-canvas" class="meter-canvas"></canvas>
+        <span id="meter-db" class="meter-db">—</span>
+      </div>
+
       <div class="console">
         <div class="console-actions">
           <button id="library-btn" class="btn btn-ghost">Library</button>

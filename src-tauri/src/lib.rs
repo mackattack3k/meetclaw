@@ -38,6 +38,13 @@ const SPEECH_MIN_FRACTION: f32 = 0.12;
 // boost quiet chunks toward this peak before transcription.
 const ASR_TARGET_PEAK: f32 = 0.3;
 const ASR_MAX_GAIN: f32 = 12.0;
+// Live input-level meter: emit the recent loudness to the UI at this cadence,
+// reporting the loudest moment since the last emit (so transients aren't missed).
+const LEVEL_EMIT_MS: u64 = 66; // ~15 Hz
+const LEVEL_FLOOR_DB: f32 = -60.0; // anything quieter reads as the meter's floor
+// Finalize normalizes the whole file per window rather than with one global gain:
+// a single loud moment would otherwise pin the peak and leave the rest inaudible.
+const ASR_NORM_WINDOW_SAMPLES: usize = 16_000 * 5; // 5s windows at 16 kHz
 
 // Gemini analysis (Phase 2).
 // Default model; the user can change it live from the UI dropdown.
@@ -110,6 +117,11 @@ struct TranscriptPayload {
 #[derive(Clone, Serialize)]
 struct SuggestionsPayload {
     questions: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct LevelPayload {
+    db: f32, // input loudness in dBFS, clamped to [LEVEL_FLOOR_DB, 0]
 }
 
 #[tauri::command]
@@ -203,7 +215,11 @@ fn finalize_transcript(
 
     if let Ok(result) = transcriber.transcribe(&samples, &lang, "") {
         let text = result.text.trim().to_string();
-        if !text.is_empty() {
+        // Guard against a collapsed whole-file pass wiping a good live transcript:
+        // refuse to replace if the result is drastically shorter (< 25%) than what
+        // the live tier already produced.
+        let live_len = meeting::read_transcript(dir).trim().len();
+        if !text.is_empty() && text.len() * 4 >= live_len {
             let _ = meeting::overwrite_transcript(dir, &text);
             let _ = app.emit("transcript-finalized", text);
         }
@@ -456,15 +472,27 @@ fn rms(samples: &[f32]) -> f32 {
 /// Boost quiet audio toward a target peak (only amplifies, never attenuates) so
 /// whisper detects/transcribes it reliably. Near-silence is left untouched.
 fn normalize_for_asr(samples: &[f32]) -> Vec<f32> {
-    let peak = samples.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
-    if peak < 0.005 {
-        return samples.to_vec(); // near-silence: don't amplify noise
+    // Normalize per window instead of with a single global gain. On a meeting
+    // with high dynamic range (one loud moment, long quiet stretches) a global
+    // peak gain clamps to ~1.0 and the quiet speech stays inaudible — which is
+    // how a 59-minute recording finalized to an empty transcript. Each window
+    // is boosted toward the target peak independently; near-silent windows are
+    // left untouched so we don't amplify background noise.
+    let mut out = Vec::with_capacity(samples.len());
+    for window in samples.chunks(ASR_NORM_WINDOW_SAMPLES) {
+        let peak = window.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
+        if peak < 0.005 {
+            out.extend_from_slice(window); // near-silence: don't amplify noise
+            continue;
+        }
+        let gain = (ASR_TARGET_PEAK / peak).clamp(1.0, ASR_MAX_GAIN);
+        if gain <= 1.001 {
+            out.extend_from_slice(window);
+        } else {
+            out.extend(window.iter().map(|&s| (s * gain).clamp(-1.0, 1.0)));
+        }
     }
-    let gain = (ASR_TARGET_PEAK / peak).clamp(1.0, ASR_MAX_GAIN);
-    if gain <= 1.001 {
-        return samples.to_vec();
-    }
-    samples.iter().map(|&s| (s * gain).clamp(-1.0, 1.0)).collect()
+    out
 }
 
 fn run_pipeline(
@@ -527,6 +555,11 @@ fn run_pipeline(
     let mut pending_count: usize = 0;
 
     let _ = app.emit("listening-started", ());
+
+    // Live input-level meter state: throttle emits and report the loudest block
+    // seen since the last emit.
+    let mut last_level_emit = Instant::now();
+    let mut level_accum: f32 = 0.0;
 
     // Process one finished chunk: always record its audio; if it contained
     // speech, transcribe it and periodically ask for suggestions.
@@ -656,6 +689,23 @@ fn run_pipeline(
             Ok(samples) => {
                 // Adaptive silence: threshold relative to the recent loudest level.
                 let level = rms(&samples);
+                // Feed the live input-level meter (loudest block since last emit).
+                level_accum = level_accum.max(level);
+                if last_level_emit.elapsed() >= Duration::from_millis(LEVEL_EMIT_MS) {
+                    last_level_emit = Instant::now();
+                    let db = if level_accum > 0.0 {
+                        20.0 * level_accum.log10()
+                    } else {
+                        LEVEL_FLOOR_DB
+                    };
+                    let _ = app.emit(
+                        "input-level",
+                        LevelPayload {
+                            db: db.clamp(LEVEL_FLOOR_DB, 0.0),
+                        },
+                    );
+                    level_accum = 0.0;
+                }
                 peak_level = (peak_level * SILENCE_PEAK_DECAY).max(level);
                 speech_ceiling = speech_ceiling.max(level);
                 chunk_peak = chunk_peak.max(level);

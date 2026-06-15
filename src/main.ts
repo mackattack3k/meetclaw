@@ -38,6 +38,9 @@ const playBtn = document.querySelector<HTMLButtonElement>("#play-btn")!;
 const seekEl = document.querySelector<HTMLInputElement>("#seek")!;
 const timeEl = document.querySelector<HTMLSpanElement>("#time")!;
 const audioEl = document.querySelector<HTMLAudioElement>("#audio")!;
+const meterEl = document.querySelector<HTMLElement>("#meter")!;
+const meterCanvas = document.querySelector<HTMLCanvasElement>("#meter-canvas")!;
+const meterDbEl = document.querySelector<HTMLSpanElement>("#meter-db")!;
 
 type SettingsView = {
   model: string;
@@ -84,6 +87,7 @@ function setListening(on: boolean) {
   toggleBtn.textContent = on ? "Stop" : "Start";
   toggleBtn.classList.toggle("recording", on);
   statusDot.classList.toggle("live", on);
+  showMeter(on);
   statusText.textContent = on
     ? "Listening — transcribing on pauses."
     : "Stopped.";
@@ -490,9 +494,97 @@ async function openMeeting(id: string) {
   }
 }
 
+// Live input-level meter (scrolling history canvas).
+const METER_FLOOR_DB = -60; // canvas bottom
+const METER_QUIET_DB = -45; // below this reads as "too quiet"
+const METER_LOUD_DB = -6; // above this is hot
+const METER_MAX_POINTS = 675; // ~45s of history at ~15 Hz
+const meterCtx = meterCanvas.getContext("2d")!;
+let meterData: number[] = [];
+
+function sizeMeterCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = meterCanvas.clientWidth;
+  const h = meterCanvas.clientHeight;
+  if (w === 0 || h === 0) return;
+  meterCanvas.width = Math.round(w * dpr);
+  meterCanvas.height = Math.round(h * dpr);
+  meterCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function dbToNorm(db: number): number {
+  const n = (db - METER_FLOOR_DB) / (0 - METER_FLOOR_DB);
+  return Math.max(0, Math.min(1, n));
+}
+
+function colorForDb(db: number): string {
+  if (db < METER_QUIET_DB) return "#6e727b"; // muted grey: too quiet
+  if (db > METER_LOUD_DB) return "#ffbb45"; // amber: hot
+  return "#5fd08a"; // green: healthy speech level
+}
+
+function drawMeter() {
+  const w = meterCanvas.clientWidth;
+  const h = meterCanvas.clientHeight;
+  if (w === 0 || h === 0) return;
+  meterCtx.clearRect(0, 0, w, h);
+
+  // Dashed "too quiet" floor line.
+  const quietY = h - dbToNorm(METER_QUIET_DB) * h;
+  meterCtx.save();
+  meterCtx.strokeStyle = "rgba(240, 169, 46, 0.35)";
+  meterCtx.lineWidth = 1;
+  meterCtx.setLineDash([4, 4]);
+  meterCtx.beginPath();
+  meterCtx.moveTo(0, quietY + 0.5);
+  meterCtx.lineTo(w, quietY + 0.5);
+  meterCtx.stroke();
+  meterCtx.restore();
+
+  // Bars: oldest on the left, newest on the right.
+  const barW = w / METER_MAX_POINTS;
+  const start = METER_MAX_POINTS - meterData.length;
+  for (let i = 0; i < meterData.length; i++) {
+    const db = meterData[i];
+    const barH = dbToNorm(db) * h;
+    meterCtx.fillStyle = colorForDb(db);
+    meterCtx.fillRect((start + i) * barW, h - barH, Math.max(barW - 0.5, 0.6), barH);
+  }
+}
+
+function pushMeterLevel(db: number) {
+  meterData.push(db);
+  if (meterData.length > METER_MAX_POINTS) meterData.shift();
+  drawMeter();
+  meterDbEl.textContent = db <= METER_FLOOR_DB ? "−∞ dB" : `${Math.round(db)} dB`;
+  meterDbEl.classList.toggle("quiet", db < METER_QUIET_DB);
+}
+
+function showMeter(on: boolean) {
+  meterEl.classList.toggle("hidden", !on);
+  if (!on) return;
+  meterData = [];
+  meterDbEl.textContent = "—";
+  meterDbEl.classList.remove("quiet");
+  // Defer sizing until the element is visible and laid out.
+  requestAnimationFrame(() => {
+    sizeMeterCanvas();
+    drawMeter();
+  });
+}
+
+window.addEventListener("resize", () => {
+  sizeMeterCanvas();
+  drawMeter();
+});
+
 // Backend events
 listen<{ text: string }>("transcript", (event) => {
   appendTranscript(event.payload.text);
+});
+
+listen<{ db: number }>("input-level", (event) => {
+  pushMeterLevel(event.payload.db);
 });
 
 listen("listening-started", () => setListening(true));

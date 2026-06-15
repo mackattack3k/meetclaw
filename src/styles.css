@@ -150,6 +150,50 @@ body::after {
   animation: rise 0.5s ease 0.05s both;
 }
 
+/* Live mic input-level meter (scrolling history). */
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: linear-gradient(180deg, var(--bg-elev), var(--panel));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+
+.meter.hidden {
+  display: none;
+}
+
+.meter-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  flex: none;
+}
+
+.meter-canvas {
+  flex: 1 1 auto;
+  height: 38px;
+  width: 100%;
+  display: block;
+}
+
+.meter-db {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  flex: none;
+  width: 64px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.meter-db.quiet {
+  color: var(--accent-bright);
+}
+
 .console-actions {
   display: flex;
   gap: 8px;
