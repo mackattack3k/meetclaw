@@ -838,6 +838,7 @@ body::after {
   color: var(--muted);
 }
 
+.library-export,
 .library-delete {
   flex: 0 0 auto;
 }
