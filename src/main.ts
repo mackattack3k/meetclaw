@@ -3,7 +3,7 @@ import "@fontsource-variable/hanken-grotesk";
 import "@fontsource-variable/jetbrains-mono";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { confirm, open } from "@tauri-apps/plugin-dialog";
+import { confirm } from "@tauri-apps/plugin-dialog";
 
 let listening = false;
 
@@ -22,17 +22,9 @@ const libraryEl = document.querySelector<HTMLElement>("#library")!;
 const libraryListEl = document.querySelector<HTMLElement>("#library-list")!;
 const libraryCloseEl = document.querySelector<HTMLButtonElement>("#library-close")!;
 const settingsBtn = document.querySelector<HTMLButtonElement>("#settings-btn")!;
-const settingsEl = document.querySelector<HTMLElement>("#settings")!;
-const settingsCloseEl = document.querySelector<HTMLButtonElement>("#settings-close")!;
 const langSelect = document.querySelector<HTMLSelectElement>("#lang-select")!;
 const detectedLangEl = document.querySelector<HTMLSpanElement>("#detected-lang")!;
 const sourceSeg = document.querySelector<HTMLElement>("#source-seg")!;
-const saveDirEl = document.querySelector<HTMLSpanElement>("#save-dir")!;
-const chooseDirBtn = document.querySelector<HTMLButtonElement>("#choose-dir")!;
-const resetDirBtn = document.querySelector<HTMLButtonElement>("#reset-dir")!;
-const apiKeyEl = document.querySelector<HTMLInputElement>("#api-key")!;
-const saveKeyBtn = document.querySelector<HTMLButtonElement>("#save-key")!;
-const keyStatusEl = document.querySelector<HTMLSpanElement>("#key-status")!;
 const playerEl = document.querySelector<HTMLElement>("#player")!;
 const playBtn = document.querySelector<HTMLButtonElement>("#play-btn")!;
 const seekEl = document.querySelector<HTMLInputElement>("#seek")!;
@@ -200,15 +192,8 @@ async function loadDevices() {
   }
 }
 
-function showSaveDir(s: SettingsView) {
-  saveDirEl.textContent = s.save_dir ?? `${s.default_save_dir}  (default)`;
-}
-
-function showKeyStatus(has: boolean) {
-  keyStatusEl.textContent = has ? "A key is saved." : "No key saved.";
-  apiKeyEl.placeholder = has ? "•••••••• (saved)" : "Paste key…";
-}
-
+// Save location and the Gemini API key live in the detached settings window
+// (settings.html); the main window only syncs the console-bar controls.
 async function refreshSettings() {
   try {
     const s = await invoke<SettingsView>("get_settings");
@@ -216,67 +201,24 @@ async function refreshSettings() {
     deviceSelect.value = s.device ?? "";
     langSelect.value = s.language;
     setSourceActive(s.audio_source);
-    showSaveDir(s);
-    showKeyStatus(s.has_api_key);
     showDetectedLang();
   } catch (err) {
     statusText.textContent = `Error loading settings: ${err}`;
   }
 }
 
-function hideSettings() {
-  settingsEl.classList.add("hidden");
-}
+// Open (or focus) the detached native settings window. Rust does the same on
+// the Cmd+, menu item, so both entry points share one code path.
 function openSettings() {
-  refreshSettings();
-  settingsEl.classList.remove("hidden");
+  invoke("open_settings").catch((err) => {
+    statusText.textContent = `Error opening settings: ${err}`;
+  });
 }
 settingsBtn.addEventListener("click", openSettings);
-settingsCloseEl.addEventListener("click", hideSettings);
 
-// Native macOS menu: Settings… (Cmd+,)
-listen("menu:settings", openSettings);
-// Esc closes the settings/library overlays.
+// Esc closes the library overlay.
 window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    hideSettings();
-    hideLibrary();
-  }
-});
-settingsEl.addEventListener("click", (e) => {
-  if (e.target === settingsEl) hideSettings();
-});
-
-chooseDirBtn.addEventListener("click", async () => {
-  try {
-    const picked = await open({ directory: true, multiple: false });
-    if (typeof picked === "string") {
-      await invoke("set_save_dir", { path: picked });
-      await refreshSettings();
-    }
-  } catch (err) {
-    statusText.textContent = `Error choosing folder: ${err}`;
-  }
-});
-
-resetDirBtn.addEventListener("click", async () => {
-  try {
-    await invoke("set_save_dir", { path: null });
-    await refreshSettings();
-  } catch (err) {
-    statusText.textContent = `Error resetting folder: ${err}`;
-  }
-});
-
-saveKeyBtn.addEventListener("click", async () => {
-  try {
-    await invoke("set_api_key", { key: apiKeyEl.value });
-    apiKeyEl.value = "";
-    await refreshSettings();
-    keyStatusEl.textContent = "Saved.";
-  } catch (err) {
-    statusText.textContent = `Error saving key: ${err}`;
-  }
+  if (e.key === "Escape") hideLibrary();
 });
 
 // Initial load: populate devices, then sync saved settings into the controls.

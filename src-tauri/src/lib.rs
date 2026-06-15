@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use audio::{resample, AudioCapture};
 use transcribe::Transcriber;
@@ -382,6 +382,27 @@ fn set_notes(app: AppHandle, notes: String, state: State<AppState>) -> Result<()
     // restart — mirrors set_title, which already does this.
     let current = ensure_meeting(&app, &state)?;
     meeting::write_notes(&current.dir, &notes)
+}
+
+/// Open the detached settings window, or focus it if it's already open.
+/// Shared by the gear button (via the `open_settings` command) and the Cmd+,
+/// menu item.
+fn open_settings_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("settings") {
+        let _ = win.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+        .title("Settings")
+        .inner_size(480.0, 340.0)
+        .min_inner_size(380.0, 260.0)
+        .resizable(true)
+        .build();
+}
+
+#[tauri::command]
+fn open_settings(app: AppHandle) {
+    open_settings_window(&app);
 }
 
 #[tauri::command]
@@ -826,7 +847,7 @@ pub fn run() {
         .on_menu_event(|app, event| {
             let id: &str = event.id.as_ref();
             if id == "settings" {
-                let _ = app.emit("menu:settings", ());
+                open_settings_window(app);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -834,6 +855,7 @@ pub fn run() {
             stop_listening,
             set_model,
             set_notes,
+            open_settings,
             set_title,
             new_meeting,
             list_meetings,
