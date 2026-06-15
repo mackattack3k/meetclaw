@@ -342,17 +342,23 @@ fn render_markdown(d: &MeetingDetail) -> String {
 /// Make a title safe to use as a file name (strip path separators and other
 /// awkward characters), falling back to "meeting" when nothing usable is left.
 fn sanitize_filename(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .take(200) // keep room for the ".md" suffix under the 255-byte filename limit
-        .map(|c| {
-            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    // Cap by bytes, not chars: multi-byte UTF-8 titles could otherwise blow past
+    // the common 255-byte filename limit. Leave room for the ".md" suffix.
+    let mut cleaned = String::new();
+    let mut used_bytes = 0usize;
+    for c in name.chars() {
+        let mapped = if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+            c
+        } else {
+            '_'
+        };
+        let b = mapped.len_utf8();
+        if used_bytes + b > 200 {
+            break;
+        }
+        cleaned.push(mapped);
+        used_bytes += b;
+    }
     let trimmed = cleaned.trim();
     if trimmed.is_empty() {
         "meeting".to_string()
