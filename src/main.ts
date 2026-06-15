@@ -3,7 +3,7 @@ import "@fontsource-variable/hanken-grotesk";
 import "@fontsource-variable/jetbrains-mono";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, save } from "@tauri-apps/plugin-dialog";
 
 let listening = false;
 
@@ -396,6 +396,27 @@ function renderLibrary(meetings: MeetingMeta[]) {
     info.append(title, when);
     info.addEventListener("click", () => openMeeting(m.id));
 
+    const exportBtn = document.createElement("button");
+    exportBtn.className = "btn btn-secondary library-export";
+    exportBtn.textContent = "Export";
+    exportBtn.addEventListener("click", async () => {
+      try {
+        // Keep path separators / reserved characters out of the suggested name
+        // (the backend sanitizes the file inside the zip regardless).
+        const safeTitle = m.title.replace(/[\\/:*?"<>|]/g, "_").trim() || "meeting";
+        const dest = await save({
+          title: "Export meeting",
+          defaultPath: `${safeTitle}.zip`,
+          filters: [{ name: "Zip archive", extensions: ["zip"] }],
+        });
+        if (!dest) return;
+        await invoke("export_meeting", { id: m.id, dest });
+        statusText.textContent = `Exported "${m.title}".`;
+      } catch (err) {
+        statusText.textContent = `Error exporting meeting: ${err}`;
+      }
+    });
+
     const del = document.createElement("button");
     del.className = "btn btn-secondary library-delete";
     del.textContent = "Delete";
@@ -414,7 +435,7 @@ function renderLibrary(meetings: MeetingMeta[]) {
       }
     });
 
-    row.append(info, del);
+    row.append(info, exportBtn, del);
     libraryListEl.appendChild(row);
   }
 }

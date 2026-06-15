@@ -275,3 +275,94 @@ pub fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
     let dir = meeting_dir(app, id)?;
     fs::remove_dir_all(&dir).map_err(|e| format!("delete meeting: {e}"))
 }
+
+/// Export a meeting as a zip at `dest`: a formatted Markdown summary (title,
+/// notes, transcript, and the suggested questions) plus the recorded audio.
+pub fn export_zip(app: &AppHandle, id: &str, dest: &Path) -> Result<(), String> {
+    let detail = load(app, id)?;
+    let dir = meeting_dir(app, id)?;
+
+    let file = File::create(dest).map_err(|e| format!("create export file: {e}"))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    let md = render_markdown(&detail);
+    zip.start_file(format!("{}.md", sanitize_filename(&detail.title)), opts)
+        .map_err(|e| format!("zip summary: {e}"))?;
+    zip.write_all(md.as_bytes())
+        .map_err(|e| format!("write summary: {e}"))?;
+
+    // Include the recorded audio if it exists.
+    if let Ok(bytes) = fs::read(dir.join("audio.wav")) {
+        zip.start_file("audio.wav", opts)
+            .map_err(|e| format!("zip audio: {e}"))?;
+        zip.write_all(&bytes).map_err(|e| format!("write audio: {e}"))?;
+    }
+
+    zip.finish().map_err(|e| format!("finalize export: {e}"))?;
+    Ok(())
+}
+
+/// Render a meeting as a shareable Markdown document. Notes, transcript, and the
+/// suggested questions all go into one file (#3).
+fn render_markdown(d: &MeetingDetail) -> String {
+    let section = |body: &str| {
+        if body.trim().is_empty() {
+            "_(none)_".to_string()
+        } else {
+            body.trim().to_string()
+        }
+    };
+
+    let mut questions = String::new();
+    let mut seen = std::collections::HashSet::new();
+    for batch in &d.suggestions {
+        for q in batch {
+            if seen.insert(q.as_str()) {
+                questions.push_str(&format!("- {q}\n"));
+            }
+        }
+    }
+    let questions = if questions.is_empty() {
+        "_(none)_".to_string()
+    } else {
+        questions.trim_end().to_string()
+    };
+
+    format!(
+        "# {}\n\n## Notes\n\n{}\n\n## Transcript\n\n{}\n\n## Suggested questions\n\n{}\n",
+        d.title,
+        section(&d.notes),
+        section(&d.transcript),
+        questions,
+    )
+}
+
+/// Make a title safe to use as a file name (strip path separators and other
+/// awkward characters), falling back to "meeting" when nothing usable is left.
+fn sanitize_filename(name: &str) -> String {
+    // Cap by bytes, not chars: multi-byte UTF-8 titles could otherwise blow past
+    // the common 255-byte filename limit. Leave room for the ".md" suffix.
+    let mut cleaned = String::new();
+    let mut used_bytes = 0usize;
+    for c in name.chars() {
+        let mapped = if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+            c
+        } else {
+            '_'
+        };
+        let b = mapped.len_utf8();
+        if used_bytes + b > 200 {
+            break;
+        }
+        cleaned.push(mapped);
+        used_bytes += b;
+    }
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        "meeting".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
