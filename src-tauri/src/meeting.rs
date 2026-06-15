@@ -194,6 +194,42 @@ pub fn finalize_wav(dir: &Path) -> Result<(), String> {
     writer.finalize().map_err(|e| format!("finalize wav: {e}"))
 }
 
+/// Recover meetings that were terminated before `finalize_wav` ran (app crash,
+/// hard kill, or quit mid-recording): rebuild `audio.wav` from `audio.pcm`
+/// wherever the WAV is missing or shorter than the PCM implies. A finalized WAV
+/// is a 44-byte header plus the PCM bytes, so anything materially smaller than
+/// `44 + pcm_len` means it was never (fully) written. Safe to run at startup
+/// when no pipeline is recording.
+pub fn recover_unfinalized(app: &AppHandle) {
+    let Ok(root) = meetings_root(app) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(&root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(pcm_meta) = fs::metadata(dir.join("audio.pcm")) else {
+            continue; // no PCM to recover from
+        };
+        let pcm_len = pcm_meta.len();
+        if pcm_len == 0 {
+            continue;
+        }
+        // Tolerate the header and a dropped trailing odd byte (chunks_exact).
+        let needs_rebuild = match fs::metadata(dir.join("audio.wav")) {
+            Ok(wav_meta) => wav_meta.len() + 40 < pcm_len + 44,
+            Err(_) => true,
+        };
+        if needs_rebuild {
+            let _ = finalize_wav(&dir);
+        }
+    }
+}
+
 pub fn list(app: &AppHandle) -> Result<Vec<MeetingMeta>, String> {
     let root = meetings_root(app)?;
     let mut metas = Vec::new();

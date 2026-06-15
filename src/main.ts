@@ -241,6 +241,18 @@ notesEl.addEventListener("input", () => {
   }, 400);
 });
 
+// Send any pending notes immediately when the window loses focus or is hidden
+// (app switch, minimize, quit), so the last keystrokes aren't lost to the
+// debounce. The backend also flushes notes on exit as a final backstop.
+function flushNotes() {
+  window.clearTimeout(notesTimer);
+  invoke("set_notes", { notes: notesEl.value }).catch(() => {});
+}
+window.addEventListener("blur", flushNotes);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushNotes();
+});
+
 // --- Meeting title, library, and persistence ---
 
 let titleTimer: number | undefined;

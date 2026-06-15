@@ -271,6 +271,28 @@ fn stop_listening(state: State<AppState>) {
     state.running.store(false, Ordering::SeqCst);
 }
 
+/// Flush the active meeting to disk when the app is exiting: stop recording,
+/// persist the latest notes, and write audio.wav from the PCM captured so far.
+/// This handles clean quits; crashes/hard kills are covered by
+/// `meeting::recover_unfinalized` at the next startup. The slow whole-file
+/// transcript pass is intentionally skipped here so quitting stays instant (the
+/// live transcript is already on disk).
+fn save_on_exit(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    state.running.store(false, Ordering::SeqCst);
+    let dir = state
+        .meeting
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|m| m.dir.clone()));
+    if let Some(dir) = dir {
+        if let Ok(notes) = state.notes.lock() {
+            let _ = meeting::write_notes(&dir, &notes);
+        }
+        let _ = meeting::finalize_wav(&dir);
+    }
+}
+
 #[tauri::command]
 fn set_model(app: AppHandle, model: String, state: State<AppState>) {
     if let Ok(mut current) = state.model.lock() {
@@ -786,6 +808,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Rebuild WAVs for any meeting that didn't finalize (crash / hard
+            // kill / quit mid-recording). Off the main thread so startup is
+            // never blocked by large recordings.
+            let recover_handle = app.handle().clone();
+            std::thread::spawn(move || meeting::recover_unfinalized(&recover_handle));
+
             let saved = settings::load(app.handle());
             app.manage(AppState {
                 running: Arc::new(AtomicBool::new(false)),
@@ -874,6 +902,12 @@ pub fn run() {
             set_language,
             set_audio_source
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Persist the active meeting before the app exits.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                save_on_exit(app_handle);
+            }
+        });
 }
