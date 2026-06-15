@@ -144,11 +144,26 @@ header. Final UX confirmed when we get there.
 - **Default-deny**; nothing runs without an explicit allow (once / rule / auto).
 - The **exact command is always shown** before running, and **output is shown**.
 - **Auto mode off by default**; allow-rules are opt-in and scoped.
+- **Allow-rules never auto-run a command with shell metacharacters** (`; & | ` `` ` ``
+  `$ ( ) < > * ? { } [ ] \`, quotes, newlines). So `run_command:gh` can't be
+  widened into `gh && rm -rf ~` — chained/redirected commands always fall through
+  to an explicit prompt where the user sees the full command. (Auto mode, by the
+  user's choice, still bypasses prompts entirely.)
+- Transcript and notes are framed as **untrusted data, not instructions**, in the
+  system prompt (defends the proactive path in PR2 against meeting-injected
+  "run rm -rf" lines).
 - Timeout + output truncation; configurable working directory.
 - Config text can't grant permissions (see `MEETCLAW.md` note).
 
-Explicitly **out of scope for v1**: OS-level sandboxing / containerization,
-network egress control, secret redaction in command output. Noted as follow-ups.
+**Accepted tradeoff:** Auto mode runs `run_command` without a prompt — requested
+explicitly (see Decisions). It's off by default and the command/output are always
+logged. Users who want it should pair it with a scoped workspace.
+
+Explicitly **out of scope for v1** (follow-ups): OS-level sandboxing /
+containerization (e.g. `sandbox-exec`), network egress control, secret redaction
+in command output, and an argv-level allowlist classifier that rejects flag-form
+exec smuggling (`git -c core.sshCommand=…`, `find -exec`, `tar
+--checkpoint-action=exec=…`).
 
 ## Phasing (signed off)
 
