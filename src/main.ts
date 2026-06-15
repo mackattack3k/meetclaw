@@ -33,6 +33,9 @@ const audioEl = document.querySelector<HTMLAudioElement>("#audio")!;
 const meterEl = document.querySelector<HTMLElement>("#meter")!;
 const meterCanvas = document.querySelector<HTMLCanvasElement>("#meter-canvas")!;
 const meterDbEl = document.querySelector<HTMLSpanElement>("#meter-db")!;
+const cameraBtn = document.querySelector<HTMLButtonElement>("#camera-btn")!;
+const cameraPreview = document.querySelector<HTMLElement>("#camera-preview")!;
+const cameraImg = document.querySelector<HTMLImageElement>("#camera-img")!;
 
 type SettingsView = {
   model: string;
@@ -42,6 +45,7 @@ type SettingsView = {
   has_api_key: boolean;
   language: string;
   audio_source: string;
+  camera: boolean;
 };
 
 type MeetingMeta = {
@@ -80,6 +84,7 @@ function setListening(on: boolean) {
   toggleBtn.classList.toggle("recording", on);
   statusDot.classList.toggle("live", on);
   showMeter(on);
+  if (!on) hideCameraPreview();
   statusText.textContent = on
     ? "Listening — transcribing on pauses."
     : "Stopped.";
@@ -177,6 +182,32 @@ for (const b of segButtons) {
   });
 }
 
+// Camera capture toggle (~1 Hz frames while recording).
+let cameraOn = false;
+function setCameraActive(on: boolean) {
+  cameraOn = on;
+  cameraBtn.classList.toggle("active", on);
+  cameraBtn.setAttribute("aria-pressed", String(on));
+  cameraBtn.textContent = on ? "On" : "Off";
+  if (!on) hideCameraPreview();
+}
+cameraBtn.addEventListener("click", () => {
+  const next = !cameraOn;
+  setCameraActive(next);
+  invoke("set_camera", { enabled: next }).catch((err) => {
+    statusText.textContent = `Error setting camera: ${err}`;
+  });
+});
+
+let cameraFrameUrl: string | null = null;
+function hideCameraPreview() {
+  cameraPreview.classList.add("hidden");
+  if (cameraFrameUrl) {
+    URL.revokeObjectURL(cameraFrameUrl);
+    cameraFrameUrl = null;
+  }
+}
+
 // Populate the input-device dropdown (options only; selection synced later).
 async function loadDevices() {
   try {
@@ -201,6 +232,7 @@ async function refreshSettings() {
     deviceSelect.value = s.device ?? "";
     langSelect.value = s.language;
     setSourceActive(s.audio_source);
+    setCameraActive(s.camera);
     showDetectedLang();
   } catch (err) {
     statusText.textContent = `Error loading settings: ${err}`;
@@ -591,6 +623,25 @@ listen<string>("language-detected", (event) => {
 // System-audio helper status (permission errors, ready).
 listen<string>("syscap-status", (event) => {
   statusText.textContent = event.payload;
+});
+
+// Camera helper status (permission errors, ready).
+listen<string>("camera-status", (event) => {
+  statusText.textContent = event.payload;
+});
+
+// A new camera frame was written — pull it and refresh the preview.
+listen("camera-frame", async () => {
+  try {
+    const buf = await invoke<ArrayBuffer>("read_current_frame");
+    const next = URL.createObjectURL(new Blob([buf], { type: "image/jpeg" }));
+    if (cameraFrameUrl) URL.revokeObjectURL(cameraFrameUrl);
+    cameraFrameUrl = next;
+    cameraImg.src = next;
+    cameraPreview.classList.remove("hidden");
+  } catch {
+    // No frame yet (or meeting closed); leave the preview as-is.
+  }
 });
 
 // Two-tier transcript: the high-quality whole-file pass after Stop.

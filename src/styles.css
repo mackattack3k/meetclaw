@@ -165,6 +165,32 @@ body::after {
   display: none;
 }
 
+/* Standalone camera toggle (a .seg outside a .segmented group needs its own border). */
+.camera-toggle {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  min-width: 46px;
+}
+
+/* Latest camera frame preview. */
+.camera-preview {
+  align-self: flex-start;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+  line-height: 0;
+}
+
+.camera-preview.hidden {
+  display: none;
+}
+
+.camera-img {
+  display: block;
+  width: 220px;
+  height: auto;
+}
+
 .meter-label {
   font-family: var(--font-mono);
   font-size: 11px;

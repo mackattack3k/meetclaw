@@ -4,5 +4,7 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>MeetClaw listens to your meeting audio to transcribe it in real time.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>MeetClaw captures occasional camera frames so the assistant can read whiteboards and visual context.</string>
 </dict>
 </plist>

@@ -1,5 +1,6 @@
 mod analyze;
 mod audio;
+mod camera;
 mod meeting;
 mod mixer;
 mod settings;
@@ -72,6 +73,9 @@ enum Capture {
 fn syscap_path() -> String {
     format!("{}/binaries/meetclaw-syscap", env!("CARGO_MANIFEST_DIR"))
 }
+fn camera_path() -> String {
+    format!("{}/binaries/meetclaw-camera", env!("CARGO_MANIFEST_DIR"))
+}
 // Analysis cadence. Suggestions fire when EITHER the timer elapses (so a slow,
 // sparse conversation still gets refreshed) OR enough new transcript segments
 // have accumulated (so dense back-and-forth gets suggestions sooner) — but never
@@ -94,6 +98,8 @@ struct AppState {
     language: Arc<Mutex<String>>,
     // Audio source ("mic" or "system").
     audio_source: Arc<Mutex<String>>,
+    // Whether to capture camera frames (~1 Hz) while recording.
+    camera: Arc<AtomicBool>,
 }
 
 /// The meeting currently being recorded into / edited.
@@ -158,8 +164,23 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         .lock()
         .map(|s| s.clone())
         .unwrap_or_else(|_| DEFAULT_AUDIO_SOURCE.to_string());
+    let camera_on = state.camera.load(Ordering::SeqCst);
 
     std::thread::spawn(move || {
+        // Capture camera frames alongside audio when enabled; the guard stops the
+        // helper as soon as recording ends.
+        let camera = if camera_on {
+            match camera::CameraCapture::start(&camera_path(), dir.clone(), app.clone()) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    let _ = app.emit("camera-status", format!("Camera unavailable: {e}"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let outcome = match run_pipeline(
             &app,
             running.clone(),
@@ -176,6 +197,7 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
                 PipelineOutcome::default()
             }
         };
+        drop(camera); // stop the camera the moment recording stops
         running.store(false, Ordering::SeqCst);
         // Write the WAV from the accumulated PCM now that recording has stopped.
         let _ = meeting::finalize_wav(&dir);
@@ -406,6 +428,25 @@ fn set_audio_source(app: AppHandle, source: String, state: State<AppState>) {
     let _ = settings::update(&app, |s| s.audio_source = Some(source));
 }
 
+#[tauri::command]
+fn set_camera(app: AppHandle, enabled: bool, state: State<AppState>) {
+    state.camera.store(enabled, Ordering::SeqCst);
+    let _ = settings::update(&app, |s| s.camera = Some(enabled));
+}
+
+/// Read the current meeting's latest camera frame (JPEG) for the live preview.
+#[tauri::command]
+fn read_current_frame(state: State<AppState>) -> Result<tauri::ipc::Response, String> {
+    let dir = state
+        .meeting
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|m| m.dir.clone()))
+        .ok_or_else(|| "no active meeting".to_string())?;
+    let bytes = std::fs::read(dir.join("frame.jpg")).map_err(|e| format!("no frame: {e}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[derive(serde::Serialize)]
 struct SettingsView {
     model: String,
@@ -415,6 +456,7 @@ struct SettingsView {
     has_api_key: bool,
     language: String,
     audio_source: String,
+    camera: bool,
 }
 
 #[tauri::command]
@@ -449,6 +491,7 @@ fn get_settings(app: AppHandle, state: State<AppState>) -> SettingsView {
         has_api_key: settings::has_api_key(),
         language,
         audio_source,
+        camera: state.camera.load(Ordering::SeqCst),
     }
 }
 
@@ -954,6 +997,7 @@ pub fn run() {
                         .audio_source
                         .unwrap_or_else(|| DEFAULT_AUDIO_SOURCE.to_string()),
                 )),
+                camera: Arc::new(AtomicBool::new(saved.camera.unwrap_or(false))),
             });
 
             // Native macOS menu: Settings… bound to Cmd+, under the app menu,
@@ -1024,7 +1068,9 @@ pub fn run() {
             set_save_dir,
             set_api_key,
             set_language,
-            set_audio_source
+            set_audio_source,
+            set_camera,
+            read_current_frame
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
