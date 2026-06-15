@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 use audio::{resample, AudioCapture};
@@ -203,7 +204,7 @@ fn finalize_transcript(
     let samples = normalize_for_asr(&samples);
     let _ = app.emit("transcript-finalizing", ());
 
-    let transcriber = match Transcriber::new(&model_path()) {
+    let transcriber = match Transcriber::new(&model_path(app)) {
         Ok(t) => t,
         Err(_) => return,
     };
@@ -492,9 +493,19 @@ fn delete_meeting(app: AppHandle, id: String, state: State<AppState>) -> Result<
     Ok(())
 }
 
-fn model_path() -> String {
-    // Multilingual base model (supports auto-detect + ~99 languages).
-    format!("{}/models/ggml-base.bin", env!("CARGO_MANIFEST_DIR"))
+// Multilingual base model (supports auto-detect + ~99 languages).
+const MODEL_REL_PATH: &str = "models/ggml-base.bin";
+
+/// Locate the whisper model. In a packaged app it's bundled into the Tauri
+/// resource dir; in `cargo`/dev builds that resource isn't staged, so fall back
+/// to the copy checked into the source tree.
+fn model_path(app: &AppHandle) -> String {
+    if let Ok(p) = app.path().resolve(MODEL_REL_PATH, BaseDirectory::Resource) {
+        if p.exists() {
+            return p.to_string_lossy().into_owned();
+        }
+    }
+    format!("{}/{}", env!("CARGO_MANIFEST_DIR"), MODEL_REL_PATH)
 }
 
 /// Join the transcript history and keep only the most recent `max_chars`
@@ -560,7 +571,7 @@ fn run_pipeline(
     source: String,
 ) -> Result<Option<String>, String> {
     // Load the model first so any error surfaces before we touch the mic.
-    let transcriber = Transcriber::new(&model_path())?;
+    let transcriber = Transcriber::new(&model_path(app))?;
 
     let (tx, rx) = mpsc::channel::<Vec<f32>>();
     // `capture` is held for the duration so the stream/helper stays alive.
