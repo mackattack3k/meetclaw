@@ -38,6 +38,17 @@
         <span id="key-status" class="setting-hint"></span>
       </div>
 
+      <div class="setting">
+        <span class="setting-label">Final transcript</span>
+        <label class="check-row">
+          <input type="checkbox" id="gemini-transcription" />
+          <span>Use Gemini for the high-accuracy final pass</span>
+        </label>
+        <span class="setting-hint">
+          More accurate than the local model, but sends the meeting audio to Google and needs an API key. Falls back to local if it fails.
+        </span>
+      </div>
+
       <hr class="settings-rule" />
 
       <div class="setting">

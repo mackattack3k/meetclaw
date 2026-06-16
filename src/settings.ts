@@ -13,6 +13,7 @@ type SettingsView = {
   save_dir: string | null;
   default_save_dir: string;
   has_api_key: boolean;
+  gemini_transcription: boolean;
 };
 
 type AgentSettings = {
@@ -29,6 +30,7 @@ const apiKeyEl = document.querySelector<HTMLInputElement>("#api-key")!;
 const saveKeyBtn = document.querySelector<HTMLButtonElement>("#save-key")!;
 const keyStatusEl = document.querySelector<HTMLSpanElement>("#key-status")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#settings-status")!;
+const geminiTranscriptionEl = document.querySelector<HTMLInputElement>("#gemini-transcription")!;
 const configEl = document.querySelector<HTMLTextAreaElement>("#agent-config")!;
 const saveConfigBtn = document.querySelector<HTMLButtonElement>("#save-config")!;
 const rulesEl = document.querySelector<HTMLTextAreaElement>("#allow-rules")!;
@@ -43,10 +45,24 @@ async function refresh() {
     saveDirEl.textContent = s.save_dir ?? `${s.default_save_dir}  (default)`;
     keyStatusEl.textContent = s.has_api_key ? "A key is saved." : "No key saved.";
     apiKeyEl.placeholder = s.has_api_key ? "•••••••• (saved)" : "Paste key…";
+    geminiTranscriptionEl.checked = s.gemini_transcription;
   } catch (err) {
     statusEl.textContent = `Error loading settings: ${err}`;
   }
 }
+
+geminiTranscriptionEl.addEventListener("change", async () => {
+  const enabled = geminiTranscriptionEl.checked;
+  try {
+    await invoke("set_gemini_transcription", { enabled });
+    statusEl.textContent = enabled
+      ? "Final transcript will use Gemini."
+      : "Final transcript will use the local model.";
+  } catch (err) {
+    geminiTranscriptionEl.checked = !enabled; // backend didn't change
+    statusEl.textContent = `Error: ${err}`;
+  }
+});
 
 async function refreshAgent() {
   try {

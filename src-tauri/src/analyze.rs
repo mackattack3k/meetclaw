@@ -6,10 +6,20 @@
 // x-goog-api-key header. Structured output is requested via generationConfig so
 // the questions come back as parseable JSON.
 
+use std::path::Path;
+use std::time::Duration;
+
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 const GEMINI_MODELS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+const GEMINI_UPLOAD_URL: &str = "https://generativelanguage.googleapis.com/upload/v1beta/files";
+const GEMINI_FILES_BASE: &str = "https://generativelanguage.googleapis.com/v1beta";
+
+const TRANSCRIBE_PROMPT: &str = "Transcribe this meeting audio verbatim. Output ONLY the transcript \
+text as continuous prose — no timestamps, no speaker labels, no preamble or commentary. The audio \
+may be noisy with multiple overlapping speakers; do your best with unclear speech. Keep the \
+original spoken language(s); do not translate.";
 
 const SYSTEM_PROMPT: &str = "You are a sharp, quiet third participant sitting in on a live meeting. \
 You are given a rolling transcript of what has been said so far, and sometimes the user's own notes. \
@@ -41,6 +51,116 @@ pub fn api_key() -> Option<String> {
         }
     }
     None
+}
+
+/// Transcribe a whole audio file with Gemini (optional high-accuracy final
+/// pass). Uploads the file via the Files API, then asks `model` for a verbatim
+/// transcript. Returns the transcript text.
+pub fn transcribe_audio(api_key: &str, model: &str, audio_path: &Path) -> Result<String, String> {
+    let bytes =
+        std::fs::read(audio_path).map_err(|e| format!("failed to read audio for transcription: {e}"))?;
+    let file_uri = upload_audio(api_key, &bytes, "audio/wav")?;
+
+    let url = format!("{GEMINI_MODELS_URL}/{model}:generateContent");
+    let body = json!({
+        "contents": [{
+            "role": "user",
+            "parts": [
+                { "text": TRANSCRIBE_PROMPT },
+                { "fileData": { "mimeType": "audio/wav", "fileUri": file_uri } }
+            ]
+        }],
+        "generationConfig": { "temperature": 0.0 }
+    });
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .post(&url)
+        .header("x-goog-api-key", api_key)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .map_err(|e| format!("Gemini transcription request failed: {e}"))?;
+    let status = resp.status();
+    let raw = resp
+        .text()
+        .map_err(|e| format!("failed to read transcription response: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("Gemini transcription error {status}: {raw}"));
+    }
+    Ok(first_text(&raw)?.unwrap_or_default().trim().to_string())
+}
+
+/// Upload audio bytes via the Gemini Files API (resumable upload, single chunk),
+/// then poll until the file is ACTIVE. Returns the file URI to reference.
+fn upload_audio(api_key: &str, bytes: &[u8], mime: &str) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // 1. Start the resumable upload; the server returns an upload URL in a header.
+    let start = client
+        .post(GEMINI_UPLOAD_URL)
+        .header("x-goog-api-key", api_key)
+        .header("X-Goog-Upload-Protocol", "resumable")
+        .header("X-Goog-Upload-Command", "start")
+        .header("X-Goog-Upload-Header-Content-Length", bytes.len().to_string())
+        .header("X-Goog-Upload-Header-Content-Type", mime)
+        .header("content-type", "application/json")
+        .json(&json!({ "file": { "display_name": "meeting-audio" } }))
+        .send()
+        .map_err(|e| format!("file upload start failed: {e}"))?;
+    let upload_url = start
+        .headers()
+        .get("x-goog-upload-url")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .ok_or("file upload start returned no upload URL")?;
+
+    // 2. Upload all bytes and finalize in one request.
+    let resp = client
+        .post(&upload_url)
+        .header("x-goog-api-key", api_key)
+        .header("X-Goog-Upload-Offset", "0")
+        .header("X-Goog-Upload-Command", "upload, finalize")
+        .body(bytes.to_vec())
+        .send()
+        .map_err(|e| format!("file upload failed: {e}"))?;
+    let raw = resp.text().map_err(|e| e.to_string())?;
+    let v: Value =
+        serde_json::from_str(&raw).map_err(|e| format!("failed to parse upload response: {e}"))?;
+    let name = v["file"]["name"]
+        .as_str()
+        .ok_or("upload response missing file name")?
+        .to_string();
+    let uri = v["file"]["uri"]
+        .as_str()
+        .ok_or("upload response missing file uri")?
+        .to_string();
+    let mut state = v["file"]["state"].as_str().unwrap_or("").to_string();
+
+    // 3. Audio is processed server-side; poll until ACTIVE before using it.
+    for _ in 0..60 {
+        match state.as_str() {
+            "ACTIVE" => return Ok(uri),
+            "FAILED" => return Err("uploaded file failed processing".to_string()),
+            _ => {}
+        }
+        std::thread::sleep(Duration::from_secs(1));
+        let g = client
+            .get(format!("{GEMINI_FILES_BASE}/{name}"))
+            .header("x-goog-api-key", api_key)
+            .send()
+            .map_err(|e| format!("file status check failed: {e}"))?;
+        let gv: Value = serde_json::from_str(&g.text().map_err(|e| e.to_string())?)
+            .map_err(|e| format!("failed to parse file status: {e}"))?;
+        state = gv["state"].as_str().unwrap_or("").to_string();
+    }
+    Err("timed out waiting for uploaded file to become ACTIVE".to_string())
 }
 
 /// Ask Gemini for suggested questions based on the current transcript context.
