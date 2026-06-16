@@ -245,9 +245,14 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
         let _ = meeting::finalize_wav(&dir);
         let _ = app.emit("listening-stopped", ());
         // High-quality whole-file re-transcription replaces the live transcript.
+        let final_model = model_for_title
+            .lock()
+            .map(|m| m.clone())
+            .unwrap_or_else(|_| DEFAULT_MODEL.to_string());
         finalize_transcript(
             &app,
             &dir,
+            &final_model,
             &language_for_final,
             outcome.established,
             outcome.language_spans,
@@ -264,10 +269,39 @@ fn start_listening(app: AppHandle, state: State<AppState>) -> Result<(), String>
 fn finalize_transcript(
     app: &AppHandle,
     dir: &std::path::Path,
+    model: &str,
     language: &Arc<Mutex<String>>,
     established: Option<String>,
     language_spans: Vec<(usize, String)>,
 ) {
+    // Optional high-accuracy pass: hand the whole recording to Gemini instead of
+    // local whisper. Opt-in (it sends audio to Google) and needs an API key; any
+    // failure falls through to the whisper pass below, so the transcript is never
+    // lost.
+    if settings::load(app).gemini_transcription.unwrap_or(false) {
+        if let Some(key) = analyze::api_key() {
+            let _ = app.emit("transcript-finalizing", ());
+            match analyze::transcribe_audio(&key, model, &dir.join("audio.wav")) {
+                Ok(text) if !text.is_empty() => {
+                    let live_len = meeting::read_transcript(dir).trim().len();
+                    if text.len() * 4 >= live_len {
+                        let _ = meeting::overwrite_transcript(dir, &text);
+                        let _ = app.emit("transcript-finalized", text);
+                        return;
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    let _ = app.emit(
+                        "analysis-error",
+                        format!("Gemini transcription failed, using local model: {e}"),
+                    );
+                }
+            }
+            // fall through to whisper on error / empty / too-short result
+        }
+    }
+
     let samples = meeting::read_wav_samples(dir);
     if samples.is_empty() {
         return;
@@ -499,6 +533,7 @@ struct SettingsView {
     language: String,
     audio_source: String,
     camera: bool,
+    gemini_transcription: bool,
 }
 
 #[tauri::command]
@@ -534,7 +569,13 @@ fn get_settings(app: AppHandle, state: State<AppState>) -> SettingsView {
         language,
         audio_source,
         camera: state.camera.load(Ordering::SeqCst),
+        gemini_transcription: s.gemini_transcription.unwrap_or(false),
     }
+}
+
+#[tauri::command]
+fn set_gemini_transcription(app: AppHandle, enabled: bool) -> Result<(), String> {
+    settings::update(&app, |s| s.gemini_transcription = Some(enabled))
 }
 
 #[tauri::command]
@@ -1286,7 +1327,8 @@ pub fn run() {
             get_agent_settings,
             set_agent_config,
             set_allow_rules,
-            set_agent_workspace
+            set_agent_workspace,
+            set_gemini_transcription
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

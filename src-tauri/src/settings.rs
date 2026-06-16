@@ -24,6 +24,9 @@ pub struct Settings {
     pub agent_allow_rules: Option<Vec<String>>,
     pub agent_auto: Option<bool>,
     pub agent_workspace: Option<String>,
+    // Use Gemini (cloud) instead of local whisper for the high-quality final
+    // transcript pass. Off by default — it sends the meeting audio to Google.
+    pub gemini_transcription: Option<bool>,
 }
 
 /// Allow-rules, seeding the read-only `web_search` auto-allow on first use.
