@@ -41,6 +41,11 @@ const camLiveEl = document.querySelector<HTMLElement>("#cam-live")!;
 const transcriptLiveEl = document.querySelector<HTMLElement>("#transcript-live")!;
 const savedStatus = document.querySelector<HTMLElement>("#saved-status")!;
 const savedText = document.querySelector<HTMLSpanElement>("#saved-text")!;
+const askForm = document.querySelector<HTMLFormElement>("#ask-form")!;
+const askInput = document.querySelector<HTMLInputElement>("#ask-input")!;
+const agentLog = document.querySelector<HTMLElement>("#agent-log")!;
+const agentAuto = document.querySelector<HTMLInputElement>("#agent-auto")!;
+const assistantScroll = document.querySelector<HTMLElement>("#assistant-scroll")!;
 
 type SettingsView = {
   model: string;
@@ -392,6 +397,7 @@ function resetPanes() {
   notesEl.value = "";
   transcriptEl.replaceChildren(makePlaceholder("Transcript will appear here…"));
   noteInSuggestions("Questions will appear here…");
+  agentLog.replaceChildren();
   clearPlayer();
   clearSaved();
   updateNewButton();
@@ -758,4 +764,167 @@ listen<string>("title-updated", (event) => {
   if (titleInput.value.trim() === "") {
     titleInput.value = event.payload;
   }
+});
+
+// --- Agent (issue #34): ask box, proposals, approval, run log ---
+
+type AgentSettings = {
+  config: string;
+  allow_rules: string[];
+  auto: boolean;
+  workspace: string;
+};
+
+// Sync the auto-mode toggle from persisted settings.
+(async () => {
+  try {
+    const s = await invoke<AgentSettings>("get_agent_settings");
+    agentAuto.checked = s.auto;
+  } catch {
+    // The settings window owns the rest; the main window only needs the toggle.
+  }
+})();
+
+agentAuto.addEventListener("change", () => {
+  const enabled = agentAuto.checked;
+  invoke("agent_set_auto", { enabled }).catch((err) => {
+    agentAuto.checked = !enabled; // backend didn't change; keep UI in sync
+    statusText.textContent = `Error setting auto mode: ${err}`;
+  });
+});
+
+function scrollAssistant() {
+  assistantScroll.scrollTop = assistantScroll.scrollHeight;
+}
+
+function agentEntry(cls: string): HTMLElement {
+  const el = document.createElement("div");
+  el.className = `agent-entry ${cls}`;
+  agentLog.appendChild(el);
+  return el;
+}
+
+function mkBtn(label: string, cls: string, onClick: () => void): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = `agent-btn agent-btn-${cls}`;
+  b.textContent = label;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+askForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = askInput.value.trim();
+  if (!text) return;
+  askInput.value = "";
+  agentEntry("agent-ask-line").textContent = text;
+  scrollAssistant();
+  invoke("agent_ask", { text }).catch((err) => {
+    agentEntry("agent-error-line").textContent = `Error: ${err}`;
+    scrollAssistant();
+  });
+});
+
+// "I think I should do X" — a proposal card with Claude Code-style approval.
+type Proposal = {
+  call_id: string;
+  tool: string;
+  command: string | null;
+  query: string | null;
+  rationale: string;
+};
+
+listen<Proposal>("agent-proposal", (event) => {
+  const p = event.payload;
+  const card = agentEntry("agent-card");
+
+  const head = document.createElement("div");
+  head.className = "agent-card-head";
+  head.textContent =
+    p.tool === "run_command"
+      ? "Run command"
+      : p.tool === "web_search"
+        ? "Web search"
+        : p.tool;
+  card.appendChild(head);
+
+  if (p.rationale) {
+    const why = document.createElement("div");
+    why.className = "agent-rationale";
+    why.textContent = p.rationale;
+    card.appendChild(why);
+  }
+
+  const detail = p.command ?? p.query ?? "";
+  if (detail) {
+    const pre = document.createElement("pre");
+    pre.className = "agent-cmd";
+    pre.textContent = detail;
+    card.appendChild(pre);
+  }
+
+  // Allow-always scope: the whole tool for web_search, the program prefix for run_command.
+  const scope =
+    p.tool === "run_command" && p.command
+      ? `run_command:${p.command.trim().split(/\s+/)[0]}`
+      : p.tool;
+
+  const actions = document.createElement("div");
+  actions.className = "agent-actions";
+  const decide = (decision: string) => {
+    invoke("agent_decision", {
+      callId: p.call_id,
+      decision,
+      scope: decision === "allow_always" ? scope : null,
+    })
+      .then(() => {
+        // Only mark the card decided once the backend accepted the verdict —
+        // otherwise the run could still be waiting while the card looks final.
+        const note = document.createElement("span");
+        note.className = "agent-decided";
+        note.textContent =
+          decision === "deny"
+            ? "Denied"
+            : decision === "allow_always"
+              ? `Always allowing ${scope}`
+              : "Allowed";
+        actions.replaceChildren(note);
+      })
+      .catch((err) => {
+        statusText.textContent = `Error: ${err}`;
+      });
+  };
+
+  const alwaysLabel = scope.startsWith("run_command:")
+    ? `Always allow ${scope.slice("run_command:".length)}`
+    : "Always allow";
+  actions.append(
+    mkBtn("Allow once", "allow", () => decide("allow_once")),
+    mkBtn(alwaysLabel, "always", () => decide("allow_always")),
+    mkBtn("Deny", "deny", () => decide("deny")),
+  );
+  card.appendChild(actions);
+  scrollAssistant();
+});
+
+type ToolResult = { call_id: string; status: string; output: string };
+
+listen<ToolResult>("agent-tool-result", (event) => {
+  const r = event.payload;
+  const entry = agentEntry(`agent-result status-${r.status}`);
+  const pre = document.createElement("pre");
+  pre.textContent = r.output || "(no output)";
+  entry.appendChild(pre);
+  scrollAssistant();
+});
+
+listen<string>("agent-message", (event) => {
+  agentEntry("agent-msg").textContent = event.payload;
+  scrollAssistant();
+});
+
+listen<string>("agent-error", (event) => {
+  agentEntry("agent-error-line").textContent = `Error: ${event.payload}`;
+  scrollAssistant();
 });

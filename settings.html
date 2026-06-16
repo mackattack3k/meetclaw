@@ -38,6 +38,39 @@
         <span id="key-status" class="setting-hint"></span>
       </div>
 
+      <hr class="settings-rule" />
+
+      <div class="setting">
+        <span class="setting-label">MEETCLAW.md — agent instructions</span>
+        <textarea id="agent-config" class="config-area" spellcheck="false"></textarea>
+        <div class="setting-row">
+          <button id="save-config" class="btn btn-primary">Save instructions</button>
+        </div>
+        <span class="setting-hint">
+          Steers the assistant. Plain guidance only — it never grants permissions.
+        </span>
+      </div>
+
+      <div class="setting">
+        <span class="setting-label">Allow-rules (one per line)</span>
+        <textarea id="allow-rules" class="config-area config-area-short" spellcheck="false"></textarea>
+        <div class="setting-row">
+          <button id="save-rules" class="btn btn-primary">Save rules</button>
+        </div>
+        <span class="setting-hint">
+          e.g. <code>web_search</code> or <code>run_command:gh</code>. These run without asking.
+        </span>
+      </div>
+
+      <div class="setting">
+        <span class="setting-label">Agent workspace (where commands run)</span>
+        <div class="setting-row">
+          <span id="agent-workspace" class="path-display">—</span>
+          <button id="choose-workspace" class="btn btn-ghost">Choose…</button>
+          <button id="reset-workspace" class="btn btn-ghost">Default</button>
+        </div>
+      </div>
+
       <p id="settings-status" class="settings-status"></p>
     </main>
     <script type="module" src="/src/settings.ts"></script>

@@ -18,6 +18,70 @@ pub struct Settings {
     pub language: Option<String>,
     pub audio_source: Option<String>,
     pub camera: Option<bool>,
+    // Agent: persisted allow-rules (e.g. "web_search", "run_command:gh"),
+    // whether auto mode (run everything without prompting) is on, and the
+    // working directory the agent runs shell commands in.
+    pub agent_allow_rules: Option<Vec<String>>,
+    pub agent_auto: Option<bool>,
+    pub agent_workspace: Option<String>,
+}
+
+/// Allow-rules, seeding the read-only `web_search` auto-allow on first use.
+pub fn agent_allow_rules(app: &AppHandle) -> Vec<String> {
+    load(app)
+        .agent_allow_rules
+        .unwrap_or_else(|| vec!["web_search".to_string()])
+}
+
+/// The directory the agent runs shell commands in: the configured workspace, or
+/// `<app data dir>/agent-workspace`. Created if missing.
+pub fn agent_workspace(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = match load(app).agent_workspace.filter(|p| !p.trim().is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("no app data dir: {e}"))?
+            .join("agent-workspace"),
+    };
+    fs::create_dir_all(&dir).map_err(|e| format!("failed to create agent workspace: {e}"))?;
+    Ok(dir)
+}
+
+fn agent_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("no app config dir: {e}"))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("failed to create config dir: {e}"))?;
+    Ok(dir.join("MEETCLAW.md"))
+}
+
+const DEFAULT_AGENT_CONFIG: &str = "# MEETCLAW.md\n\n\
+Instructions for the in-meeting assistant. Edit freely.\n\n\
+- Be concise. Propose an action only when it clearly helps.\n\
+- Prefer read-only commands; explain destructive ones before proposing them.\n\n\
+## Context\n\n\
+(Describe your projects, tools, and preferences here.)\n";
+
+/// The user-editable `MEETCLAW.md` that steers the agent. Returns the starter
+/// template only when the file doesn't exist yet; other read errors (permissions,
+/// I/O) are surfaced rather than masked — masking them risks the editor showing
+/// the template and then clobbering a real file on save.
+pub fn read_agent_config(app: &AppHandle) -> Result<String, String> {
+    let path = agent_config_path(app)?;
+    match fs::read_to_string(&path) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Ok(DEFAULT_AGENT_CONFIG.to_string())
+        }
+        Err(e) => Err(format!("read MEETCLAW.md: {e}")),
+    }
+}
+
+pub fn write_agent_config(app: &AppHandle, content: &str) -> Result<(), String> {
+    let path = agent_config_path(app)?;
+    fs::write(path, content).map_err(|e| format!("write MEETCLAW.md: {e}"))
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {

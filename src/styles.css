@@ -880,6 +880,201 @@ body {
   animation: fade 0.45s ease both;
 }
 
+/* ---- Assistant panel (agent) ---- */
+.auto-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.auto-toggle input {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+#agent-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#agent-log:not(:empty) {
+  margin-top: 14px;
+}
+
+.ask {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.ask-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.ask-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.ask-btn {
+  flex: 0 0 auto;
+  background: var(--ink);
+  color: var(--on-ink);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 9px 16px;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.ask-btn:hover {
+  opacity: 0.9;
+}
+
+.agent-ask-line {
+  align-self: flex-end;
+  max-width: 90%;
+  background: var(--accent-soft);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+.agent-card {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.agent-card-head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.agent-rationale {
+  font-size: 14px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.agent-cmd {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: var(--surface-inset);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+}
+
+.agent-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.agent-btn {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+}
+
+.agent-btn:hover {
+  color: var(--text);
+  border-color: #cfd3da;
+}
+
+.agent-btn-allow {
+  background: var(--ink);
+  color: var(--on-ink);
+  border-color: transparent;
+}
+
+.agent-btn-allow:hover {
+  opacity: 0.9;
+  color: var(--on-ink);
+}
+
+.agent-btn-deny {
+  color: var(--rec);
+}
+
+.agent-decided {
+  font-size: 13px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.agent-result pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-inset);
+  border-left: 3px solid var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+  max-height: 240px;
+  overflow: auto;
+}
+
+.agent-result.status-ok pre {
+  border-left-color: var(--good);
+}
+
+.agent-result.status-error pre {
+  border-left-color: var(--rec);
+}
+
+.agent-msg {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.agent-error-line {
+  font-size: 13px;
+  color: var(--rec);
+}
+
 /* ---- Library modal ---- */
 .library {
   position: fixed;
@@ -1075,6 +1270,35 @@ body {
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--muted);
+}
+
+.settings-rule {
+  border: none;
+  border-top: 1px solid var(--border-soft);
+  margin: 4px 0;
+}
+
+.config-area {
+  width: 100%;
+  min-height: 150px;
+  resize: vertical;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.config-area-short {
+  min-height: 70px;
+}
+
+.config-area:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .settings-note {
