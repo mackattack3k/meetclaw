@@ -24,6 +24,16 @@ const GEMINI_URL: &str = "https://generativelanguage.googleapis.com/v1beta/model
 const MAX_STEPS: usize = 8; // tool calls per run, runaway guard
 const CMD_TIMEOUT_SECS: u64 = 30;
 const MAX_OUTPUT_BYTES: usize = 10_000; // truncate tool output before feeding it back
+const HTTP_TIMEOUT_SECS: u64 = 60; // cap on each Gemini call so a stall can't hang the run
+
+/// A blocking HTTP client with an explicit timeout (so a stalled network call
+/// can't wedge the agent thread past its stop signal).
+fn http_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new())
+}
 
 const SYSTEM_PROMPT: &str = "You are MeetClaw's in-meeting assistant. You can take actions on the \
 user's behalf by calling tools: run shell commands (run_command) and search the web (web_search). \
@@ -50,8 +60,10 @@ pub enum Decision {
 }
 
 /// Live handle to the running agent, held in app state so commands can steer it.
+/// Decisions carry the proposal's `call_id` so a stale/delayed click can't
+/// authorize a different pending call.
 pub struct AgentHandle {
-    pub decision_tx: std::sync::mpsc::Sender<Decision>,
+    pub decision_tx: std::sync::mpsc::Sender<(String, Decision)>,
     pub stop: Arc<AtomicBool>,
 }
 
@@ -88,7 +100,7 @@ pub struct RunArgs {
 pub fn run_agent(
     app: AppHandle,
     args: RunArgs,
-    decision_rx: Receiver<Decision>,
+    decision_rx: Receiver<(String, Decision)>,
     stop: Arc<AtomicBool>,
 ) {
     let tools = tool_declarations();
@@ -192,7 +204,7 @@ pub fn run_agent(
 #[allow(clippy::too_many_arguments)]
 fn resolve_decision(
     app: &AppHandle,
-    decision_rx: &Receiver<Decision>,
+    decision_rx: &Receiver<(String, Decision)>,
     stop: &Arc<AtomicBool>,
     rules: &Arc<Mutex<Vec<String>>>,
     auto: &Arc<AtomicBool>,
@@ -217,14 +229,17 @@ fn resolve_decision(
         },
     );
 
-    // Block until the UI answers (or the run is stopped).
+    // Block until the UI answers FOR THIS proposal (or the run is stopped).
+    // Decisions for a different call_id are stale (e.g. a delayed double-click on
+    // an already-resolved card) and are ignored so they can't authorize this one.
     loop {
         if stop.load(Ordering::SeqCst) {
             return None;
         }
         match decision_rx.recv_timeout(Duration::from_millis(250)) {
-            Ok(Decision::AllowOnce) | Ok(Decision::AllowAlways) => return Some(()),
-            Ok(Decision::Deny) => return None,
+            Ok((cid, _)) if cid != call_id => continue,
+            Ok((_, Decision::AllowOnce)) | Ok((_, Decision::AllowAlways)) => return Some(()),
+            Ok((_, Decision::Deny)) => return None,
             Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => return None,
         }
@@ -356,7 +371,7 @@ fn web_search(api_key: &str, model: &str, query: &str) -> Result<String, String>
         "contents": [{ "role": "user", "parts": [{ "text": query }] }],
         "tools": [{ "google_search": {} }],
     });
-    let client = reqwest::blocking::Client::new();
+    let client = http_client();
     let resp = client
         .post(&url)
         .header("x-goog-api-key", api_key)
@@ -416,7 +431,7 @@ fn call_gemini(
         "tools": tools,
         "toolConfig": { "functionCallingConfig": { "mode": "AUTO" } },
     });
-    let client = reqwest::blocking::Client::new();
+    let client = http_client();
     let resp = client
         .post(&url)
         .header("x-goog-api-key", api_key)

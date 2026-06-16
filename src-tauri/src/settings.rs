@@ -64,13 +64,19 @@ Instructions for the in-meeting assistant. Edit freely.\n\n\
 ## Context\n\n\
 (Describe your projects, tools, and preferences here.)\n";
 
-/// The user-editable `MEETCLAW.md` that steers the agent. Falls back to a
-/// starter template when the file doesn't exist yet.
-pub fn read_agent_config(app: &AppHandle) -> String {
-    agent_config_path(app)
-        .ok()
-        .and_then(|p| fs::read_to_string(p).ok())
-        .unwrap_or_else(|| DEFAULT_AGENT_CONFIG.to_string())
+/// The user-editable `MEETCLAW.md` that steers the agent. Returns the starter
+/// template only when the file doesn't exist yet; other read errors (permissions,
+/// I/O) are surfaced rather than masked — masking them risks the editor showing
+/// the template and then clobbering a real file on save.
+pub fn read_agent_config(app: &AppHandle) -> Result<String, String> {
+    let path = agent_config_path(app)?;
+    match fs::read_to_string(&path) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Ok(DEFAULT_AGENT_CONFIG.to_string())
+        }
+        Err(e) => Err(format!("read MEETCLAW.md: {e}")),
+    }
 }
 
 pub fn write_agent_config(app: &AppHandle, content: &str) -> Result<(), String> {

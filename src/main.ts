@@ -786,7 +786,9 @@ type AgentSettings = {
 })();
 
 agentAuto.addEventListener("change", () => {
-  invoke("agent_set_auto", { enabled: agentAuto.checked }).catch((err) => {
+  const enabled = agentAuto.checked;
+  invoke("agent_set_auto", { enabled }).catch((err) => {
+    agentAuto.checked = !enabled; // backend didn't change; keep UI in sync
     statusText.textContent = `Error setting auto mode: ${err}`;
   });
 });
@@ -872,20 +874,26 @@ listen<Proposal>("agent-proposal", (event) => {
   actions.className = "agent-actions";
   const decide = (decision: string) => {
     invoke("agent_decision", {
+      callId: p.call_id,
       decision,
       scope: decision === "allow_always" ? scope : null,
-    }).catch((err) => {
-      statusText.textContent = `Error: ${err}`;
-    });
-    const note = document.createElement("span");
-    note.className = "agent-decided";
-    note.textContent =
-      decision === "deny"
-        ? "Denied"
-        : decision === "allow_always"
-          ? `Always allowing ${scope}`
-          : "Allowed";
-    actions.replaceChildren(note);
+    })
+      .then(() => {
+        // Only mark the card decided once the backend accepted the verdict —
+        // otherwise the run could still be waiting while the card looks final.
+        const note = document.createElement("span");
+        note.className = "agent-decided";
+        note.textContent =
+          decision === "deny"
+            ? "Denied"
+            : decision === "allow_always"
+              ? `Always allowing ${scope}`
+              : "Allowed";
+        actions.replaceChildren(note);
+      })
+      .catch((err) => {
+        statusText.textContent = `Error: ${err}`;
+      });
   };
 
   const alwaysLabel = scope.startsWith("run_command:")

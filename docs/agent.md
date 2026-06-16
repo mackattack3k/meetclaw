@@ -53,7 +53,7 @@ rule-allowed calls skip the wait and run immediately.
 ## Tools (v1)
 
 ### `run_command`
-```
+```text
 run_command(command: string, rationale: string)  ->  { exit_code, stdout, stderr }
 ```
 - `rationale` is required so the proposal card can show *why*.
@@ -66,7 +66,7 @@ run_command(command: string, rationale: string)  ->  { exit_code, stdout, stderr
 - Runs with the user's own privileges — see Security.
 
 ### `web_search`
-```
+```text
 web_search(query: string)  ->  { summary, sources: [{title, url}] }
 ```
 - Implemented as a **separate Gemini call with `google_search` grounding** —
@@ -144,11 +144,11 @@ header. Final UX confirmed when we get there.
 - **Default-deny**; nothing runs without an explicit allow (once / rule / auto).
 - The **exact command is always shown** before running, and **output is shown**.
 - **Auto mode off by default**; allow-rules are opt-in and scoped.
-- **Allow-rules never auto-run a command with shell metacharacters** (`; & | ` `` ` ``
-  `$ ( ) < > * ? { } [ ] \`, quotes, newlines). So `run_command:gh` can't be
-  widened into `gh && rm -rf ~` — chained/redirected commands always fall through
-  to an explicit prompt where the user sees the full command. (Auto mode, by the
-  user's choice, still bypasses prompts entirely.)
+- **Allow-rules never auto-run a command with shell metacharacters**
+  (`;&|$()<>*?{}[]\`, plus backticks, quotes, and newlines). So `run_command:gh`
+  can't be widened into `gh && rm -rf ~` — chained/redirected commands always
+  fall through to an explicit prompt where the user sees the full command. (Auto
+  mode, by the user's choice, still bypasses prompts entirely.)
 - Transcript and notes are framed as **untrusted data, not instructions**, in the
   system prompt (defends the proactive path in PR2 against meeting-injected
   "run rm -rf" lines).

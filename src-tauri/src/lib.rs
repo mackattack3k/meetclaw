@@ -668,7 +668,7 @@ fn agent_ask(app: AppHandle, text: String, state: State<AppState>) -> Result<(),
         .ok()
         .and_then(|g| g.as_ref().map(|m| meeting::read_transcript(&m.dir)))
         .unwrap_or_default();
-    let agent_md = settings::read_agent_config(&app);
+    let agent_md = settings::read_agent_config(&app)?;
     let workspace = settings::agent_workspace(&app)?;
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -709,6 +709,7 @@ fn agent_ask(app: AppHandle, text: String, state: State<AppState>) -> Result<(),
 #[tauri::command]
 fn agent_decision(
     app: AppHandle,
+    call_id: String,
     decision: String,
     scope: Option<String>,
     state: State<AppState>,
@@ -730,7 +731,7 @@ fn agent_decision(
         .map_err(|_| "agent lock poisoned".to_string())?;
     if let Some(h) = handle.as_ref() {
         h.decision_tx
-            .send(verdict)
+            .send((call_id, verdict))
             .map_err(|_| "agent run already ended".to_string())?;
     }
     Ok(())
@@ -765,9 +766,9 @@ fn agent_set_auto(app: AppHandle, enabled: bool, state: State<AppState>) -> Resu
 }
 
 #[tauri::command]
-fn get_agent_settings(app: AppHandle, state: State<AppState>) -> AgentSettingsView {
-    AgentSettingsView {
-        config: settings::read_agent_config(&app),
+fn get_agent_settings(app: AppHandle, state: State<AppState>) -> Result<AgentSettingsView, String> {
+    Ok(AgentSettingsView {
+        config: settings::read_agent_config(&app)?,
         allow_rules: state
             .agent_rules
             .lock()
@@ -777,7 +778,7 @@ fn get_agent_settings(app: AppHandle, state: State<AppState>) -> AgentSettingsVi
         workspace: settings::agent_workspace(&app)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default(),
-    }
+    })
 }
 
 #[tauri::command]

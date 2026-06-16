@@ -992,7 +992,7 @@ body {
   font-family: var(--font-mono);
   font-size: 12.5px;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   color: var(--text-dim);
 }
 
@@ -1050,7 +1050,7 @@ body {
   font-family: var(--font-mono);
   font-size: 12px;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   color: var(--text-dim);
   max-height: 240px;
   overflow: auto;
