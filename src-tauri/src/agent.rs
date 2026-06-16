@@ -27,12 +27,13 @@ const MAX_OUTPUT_BYTES: usize = 10_000; // truncate tool output before feeding i
 const HTTP_TIMEOUT_SECS: u64 = 60; // cap on each Gemini call so a stall can't hang the run
 
 /// A blocking HTTP client with an explicit timeout (so a stalled network call
-/// can't wedge the agent thread past its stop signal).
-fn http_client() -> reqwest::blocking::Client {
+/// can't wedge the agent thread past its stop signal). Errors out rather than
+/// falling back to an untimed client, which would lose that guarantee.
+fn http_client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
         .build()
-        .unwrap_or_else(|_| reqwest::blocking::Client::new())
+        .map_err(|e| format!("failed to build HTTP client: {e}"))
 }
 
 const SYSTEM_PROMPT: &str = "You are MeetClaw's in-meeting assistant. You can take actions on the \
@@ -371,7 +372,7 @@ fn web_search(api_key: &str, model: &str, query: &str) -> Result<String, String>
         "contents": [{ "role": "user", "parts": [{ "text": query }] }],
         "tools": [{ "google_search": {} }],
     });
-    let client = http_client();
+    let client = http_client()?;
     let resp = client
         .post(&url)
         .header("x-goog-api-key", api_key)
@@ -431,7 +432,7 @@ fn call_gemini(
         "tools": tools,
         "toolConfig": { "functionCallingConfig": { "mode": "AUTO" } },
     });
-    let client = http_client();
+    let client = http_client()?;
     let resp = client
         .post(&url)
         .header("x-goog-api-key", api_key)
